@@ -43,3 +43,19 @@ class TestOCREngineAbstraction:
         
         res = service.extract(np.zeros((50, 50), dtype=np.uint8))
         assert isinstance(res, OCRResult)
+
+    def test_mock_ocr_engine_extract_mrz(self):
+        engine = MockOCREngine()
+        dummy_img = np.zeros((100, 300), dtype=np.uint8)
+        mrz_res = engine.extract_mrz_text(dummy_img)
+        assert isinstance(mrz_res, OCRResult)
+        assert "P<UTOERIKSSON" in mrz_res.raw_text
+        assert len(mrz_res.regions) >= 2
+
+    def test_ocr_service_extract_mrz_dispatch(self):
+        mock_engine = MockOCREngine()
+        service = OCRService(engine=mock_engine)
+        res = service.extract_mrz(np.zeros((50, 200), dtype=np.uint8))
+        assert isinstance(res, OCRResult)
+        assert res.average_confidence >= 0.90
+

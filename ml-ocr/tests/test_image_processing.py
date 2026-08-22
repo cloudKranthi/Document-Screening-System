@@ -95,3 +95,59 @@ class TestImageService:
         assert meta.preprocessing_applied is True
         assert meta.original_dimensions == [800, 600]
         assert meta.processed_dimensions is not None
+
+    def test_mrz_region_crop_and_preprocessing_variants(self, create_dummy_image):
+        img_bytes = create_dummy_image(text="MRZ BOTTOM TEST")
+        decoded = ImageService.decode_image(img_bytes)
+        
+        variants = ImageService.get_mrz_preprocessed_variants(decoded, bottom_ratio=0.35)
+        assert len(variants) == 4
+        
+        var_names = [v[0] for v in variants]
+        assert "clahe" in var_names
+        assert "otsu" in var_names
+        assert "adaptive" in var_names
+        assert "blackhat" in var_names
+        
+        for name, img in variants:
+            assert img is not None
+            # Verify upscale factor was applied
+            assert img.shape[1] == int(decoded.shape[1] * 3.0)
+            assert len(img.shape) == 2  # Grayscale/Binarized
+
+    def test_get_all_mrz_crop_variants(self, create_dummy_image):
+        img_bytes = create_dummy_image(text="MULTI CROP TEST")
+        decoded = ImageService.decode_image(img_bytes)
+        
+        all_crops = ImageService.get_all_mrz_crop_variants(decoded, ratios=[0.20, 0.35], scale_factor=3.0)
+        assert len(all_crops) == 2 * 4  # 2 ratios x 4 variants
+        for label, ratio, img in all_crops:
+            assert ratio in [0.20, 0.35]
+            assert img is not None
+
+    def test_get_field_candidate_crops_and_preprocessing(self, create_dummy_image):
+        """Test generation of targeted dynamic ROI crops and preprocessing variants around a field label."""
+        img_bytes = create_dummy_image(text="FIELD CROP TEST")
+        decoded = ImageService.decode_image(img_bytes)
+        
+        label_bbox = [50, 100, 100, 130] # label [lx1, ly1, lx2, ly2]
+        field_variants = ImageService.get_field_crop_variants(decoded, label_bbox=label_bbox, field_type="dob", scale_factor=3.0)
+        
+        assert len(field_variants) > 0
+        crop_names = [v[0] for v in field_variants]
+        prep_names = [v[1] for v in field_variants]
+        
+        assert any("right" in c for c in crop_names)
+        assert any("below" in c for c in crop_names)
+        assert "clahe_sharp" in prep_names
+        assert "otsu" in prep_names
+        assert "adaptive" in prep_names
+        
+        for crop_name, prep_name, prep_img, crop_bbox in field_variants:
+            assert prep_img is not None
+            assert len(prep_img.shape) == 2
+            assert prep_img.shape[0] > 10
+            assert prep_img.shape[1] > 10
+
+
+

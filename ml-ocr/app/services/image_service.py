@@ -11,9 +11,15 @@ from app.utils.image_utils import (
     deskew_image,
     detect_document_contour,
     enhance_for_ocr,
+    extract_mrz_region,
     four_point_transform,
+    get_field_candidate_crops,
+    get_mrz_candidate_crops,
+    preprocess_field_crop,
+    preprocess_mrz_crop,
     resize_image_if_needed,
 )
+
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -132,3 +138,56 @@ class ImageService:
         )
         
         return original_img, ocr_optimized, metadata
+
+    @classmethod
+    def get_mrz_preprocessed_variants(cls, image: np.ndarray, bottom_ratio: float = 0.35) -> list[tuple[str, np.ndarray]]:
+        """Extracts the bottom MRZ region and returns multiple preprocessed image variants."""
+        mrz_crop = extract_mrz_region(image, bottom_ratio=bottom_ratio)
+        return preprocess_mrz_crop(mrz_crop, scale_factor=settings.MRZ_UPSCALE_FACTOR)
+
+    @classmethod
+    def get_all_mrz_crop_variants(
+        cls,
+        image: np.ndarray,
+        ratios: Optional[list[float]] = None,
+        scale_factor: float = 3.0
+    ) -> list[tuple[str, float, np.ndarray]]:
+        """Generates all combinations of crop ratios and preprocessing variants.
+        
+        Returns:
+            List of tuples: (variant_name, ratio, processed_image)
+        """
+        if ratios is None:
+            ratios = settings.MRZ_CROP_RATIOS
+            
+        candidate_crops = get_mrz_candidate_crops(image, ratios=ratios)
+        all_variants = []
+        for ratio, crop in candidate_crops:
+            variants = preprocess_mrz_crop(crop, scale_factor=scale_factor)
+            for var_name, var_img in variants:
+                all_variants.append((f"{var_name}_r{int(ratio*100)}", ratio, var_img))
+        return all_variants
+
+    @classmethod
+    def get_field_crop_variants(
+        cls,
+        image: np.ndarray,
+        label_bbox: list[int],
+        field_type: str = "dob",
+        scale_factor: float = 3.0
+    ) -> list[tuple[str, str, np.ndarray, list[int]]]:
+        """Generates all combinations of field candidate crop geometries and preprocessing variants.
+        
+        Returns:
+            List of tuples: (crop_name, prep_name, preprocessed_image, crop_bbox)
+        """
+        candidate_crops = get_field_candidate_crops(image, label_bbox=label_bbox, field_type=field_type)
+        all_variants = []
+        for crop_name, crop_img, crop_bbox in candidate_crops:
+            preprocessed_list = preprocess_field_crop(crop_img, scale_factor=scale_factor)
+            for prep_name, prep_img in preprocessed_list:
+                all_variants.append((crop_name, prep_name, prep_img, crop_bbox))
+        return all_variants
+
+
+

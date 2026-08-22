@@ -9,12 +9,24 @@ Built with **Python 3.11+ / FastAPI / OpenCV / Modular OCR (Tesseract / PaddleOC
 ## 🎯 Objectives & Features
 
 - **Multi-Document Support**: Automated extraction and classification for **Passports**, **Visas**, and **National IDs**.
-- **ICAO 9303 TD3 Passport MRZ Parsing**:
-  - Full support for standard 2-line, 44-character TD3 Machine Readable Zones.
-  - Strict **ICAO 9303 check-digit calculation and validation** (weights 7, 3, 1 repeating) for passport number, date of birth, expiry date, optional/personal number, and composite check digits.
-  - OCR artifact and context-aware character normalization (e.g. `O` vs `0`, `I` vs `1`, `«` vs `<`).
+- **ICAO 9303 Multi-Format MRZ Parsing**:
+  - **TD3 ($2 \times 44$)**: Passports.
+  - **MRV-A ($2 \times 44$) & MRV-B ($2 \times 36$)**: Machine-readable Visas.
+  - **TD1 ($3 \times 30$) & TD2 ($2 \times 36$)**: Machine-readable National ID cards.
+  - Strict **ICAO 9303 check-digit calculation and validation** (weights 7, 3, 1 repeating) for document number, date of birth, expiry date, optional/personal numbers, and composite check digits.
+  - Deterministic check-digit verified correction and position-aware character validation.
   - Strict distinction: MRZ verification guarantees mathematical consistency, not document authenticity.
-- **Robust OpenCV Image Processing Pipeline**:
+- **National ID Non-MRZ Support (English-First Strategy)**:
+  - **Same-Line Token Grouping**: Merges adjacent horizontal word tokens into unified candidate lines with length-weighted confidence aggregation.
+  - **Quality & Morphology Candidate Scoring**: Ranks personal name candidates by English morphology, Title Case capitalization, multi-word composition ($2-4$ words), and Latin character purity.
+  - **Confidence Gating ($0.50$ threshold)**: Filters out low-confidence OCR garbage artifacts (e.g. `"wher"` with confidence $0.10$) while prioritizing high-confidence English names (e.g. `"Sriram Mamundi"` with confidence $0.85$).
+  - **Header & Institutional Blacklist**: Prevents government/authority titles (`GOVERNMENT OF INDIA`, `UNIQUE IDENTIFICATION AUTHORITY OF INDIA`, `IDENTITY CARD`) from being incorrectly selected as personal names.
+  - Heuristic and regex label-value extraction for name, ID number (Aadhaar, SSN, PAN, alphanumeric IDs), DOB, gender, nationality, and address.
+  - Graceful handling when MRZ is unavailable, returning extracted fields with clear informational warnings.
+
+- **Explainable Document Classification**:
+  - Classifies document type into `passport`, `visa`, `national_id` using format signatures and visual OCR keywords.
+
   - Safe file ingestion and MIME/dimension validation.
   - 4-corner document boundary detection and homography-based perspective warp (4-point transform).
   - Graceful fallback when document boundary contour detection fails.
@@ -273,26 +285,37 @@ pytest -v
   - ICAO check digit calculation ($7, 3, 1$ algorithm).
   - Validation with expected vs mismatched check digits.
   - Character mapping (`A-Z` $\rightarrow 10-35$, `0-9` $\rightarrow 0-9$, `<` $\rightarrow 0$).
-  - TD3 44-character line length validation.
-  - Full TD3 parsing and check-digit assertions on standard ICAO test vectors.
-  - Tampered passport number, DOB, and expiry check-digit invalidation.
-  - Graceful handling of missing MRZ.
-  - OCR noise cleaning and error normalization (`O` vs `0`, `I` vs `1`, etc.).
+  - TD3, MRV-A, MRV-B, TD1, TD2 parsing and check digit validation.
+  - Tampered document number, DOB, expiry, and composite check-digit detection.
+  - Candidate scoring and best candidate ranking across multi-pass OCR outputs.
+  - Deterministic check-digit verified correction.
+  - Explicit field-level validation (`field_validation`).
+- **`test_document.py`**:
+  - Explainable classification tests for `passport`, `visa`, `national_id`, and fallback.
+  - `PassportExtractor`, `VisaExtractor`, and `NationalIDExtractor` unit tests.
+  - Non-MRZ National ID visual field extraction and warning generation.
 - **`test_confidence.py`**:
   - Score normalization to range $[0.0, 1.0]$.
   - Weighted average calculation across text token lengths.
   - Empty region / zero detection boundary handling.
 - **`test_image_processing.py`**:
   - 4-point coordinate sorting and perspective warp.
-  - CLAHE enhancement and noise filtering.
+  - MRZ region bottom ROI cropping across multiple ratios (`[0.20, 0.25, 0.30, 0.35, 0.40]`).
+  - MRZ $3.0\times$ upscaling, CLAHE, Otsu, Adaptive, and Blackhat binarization variants.
   - Synthetic tilted card contour detection.
   - Blank/featureless image fallback (`crop_success=false`).
   - Corrupted bytes rejection.
+- **`test_ocr.py`**:
+  - General OCR extraction and bounding box formats.
+  - Dedicated MRZ OCR extraction (`extract_mrz_text`) with PSM 6, 4, 11 and strict character whitelist.
+  - Pluggable OCR engine dispatch.
 - **`test_api.py`**:
   - `GET /health` and `GET /api/v1/health`.
-  - `POST /api/v1/ocr/extract` for Passport, Visa, and National ID.
-  - Auto document classification.
+  - `POST /api/v1/ocr/extract` for Passport, Visa (MRV-A), and National ID (TD1 & non-MRZ).
+  - Auto document classification and diagnostics.
+  - Debug mode parameter (`include_debug=true`) returning candidate scores and metrics.
   - Bad request validation (unsupported extensions, empty files, corrupt data).
+
 
 ---
 
@@ -302,3 +325,5 @@ pytest -v
 2. **In-Memory Image Processing**: Document images are processed directly from memory buffers (`cv2.imdecode`) and are never written to permanent disk storage.
 3. **Payload Sanitization**: File type validation, MIME type checks, and maximum file size limits (default 15MB) prevent denial-of-service and arbitrary file execution.
 4. **Least-Privilege Container**: Dockerfile executes under an unprivileged `appuser` (UID 1000).
+
+

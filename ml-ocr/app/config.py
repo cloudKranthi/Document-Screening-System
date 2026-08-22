@@ -36,8 +36,17 @@ class Settings(BaseSettings):
     OCR_ENGINE: str = os.getenv("OCR_ENGINE", "auto")  # "paddleocr", "tesseract", "auto", "mock"
     TESSERACT_CMD: str = os.getenv("TESSERACT_CMD", "")
     
+    # MRZ Processing settings
+    MRZ_CROP_RATIOS: List[float] = [0.20, 0.25, 0.30, 0.35, 0.40]
+    MRZ_UPSCALE_FACTOR: float = 3.0
+    
+    # National ID / Visual OCR settings
+    NATIONAL_ID_CONFIDENCE_THRESHOLD: float = 0.50
+    DEFAULT_LANGUAGE_MODE: str = "english_first"
+    
     # Security
     MASK_PII_LOGS: bool = True
+
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

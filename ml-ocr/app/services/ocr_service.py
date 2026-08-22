@@ -42,6 +42,16 @@ class BaseOCREngine(ABC):
         """
         pass
 
+    @abstractmethod
+    def extract_mrz_text(self, image: np.ndarray, psm: int = 6) -> OCRResult:
+        """Extracts text from an MRZ-dedicated image region using MRZ-specific segmentation and whitelist."""
+        pass
+
+    @abstractmethod
+    def extract_field_text(self, image: np.ndarray, field_type: str, psm: int = 7) -> OCRResult:
+        """Extracts text from a targeted small ROI crop (DOB or Gender) with field-specific whitelist and PSM."""
+        pass
+
 
 class TesseractOCREngine(BaseOCREngine):
     """Tesseract OCR Engine adapter using pytesseract."""
@@ -60,7 +70,7 @@ class TesseractOCREngine(BaseOCREngine):
 
     def extract_text(self, image: np.ndarray) -> OCRResult:
         try:
-            # Use PSM 6 or 3 for general document layout
+            # Use PSM 3 for general document layout
             custom_config = r'--oem 3 --psm 3'
             data = self.pytesseract.image_to_data(
                 image,
@@ -103,6 +113,112 @@ class TesseractOCREngine(BaseOCREngine):
         except Exception as e:
             logger.error(f"Tesseract OCR extraction failed: {str(e)}")
             raise RuntimeError(f"Tesseract execution error: {str(e)}")
+
+    def extract_mrz_text(self, image: np.ndarray, psm: int = 6) -> OCRResult:
+        """Dedicated MRZ OCR extraction with configurable PSM, strict ICAO whitelist, and dictionary lookup disabled."""
+        try:
+            # Disables dictionary word lookup to prevent Tesseract from turning '<<<<' into words like 'EERE' or 'KERR'.
+            mrz_config = (
+                f'--oem 3 --psm {psm} '
+                '-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789< '
+                '-c load_system_dawg=0 '
+                '-c load_freq_dawg=0 '
+                '-c load_punc_dawg=0 '
+                '-c load_number_dawg=0 '
+                '-c load_bigram_dawg=0'
+            )
+            data = self.pytesseract.image_to_data(
+                image,
+                config=mrz_config,
+                output_type=self.pytesseract.Output.DICT
+            )
+            
+            regions: List[OCRRegion] = []
+            extracted_words = []
+            
+            n_boxes = len(data['text'])
+            for i in range(n_boxes):
+                text = str(data['text'][i]).strip()
+                conf_raw = data['conf'][i]
+                
+                if not text or conf_raw == -1 or conf_raw == '-1':
+                    continue
+                    
+                try:
+                    conf_float = float(conf_raw)
+                except ValueError:
+                    conf_float = 0.0
+                    
+                norm_conf = ConfidenceService.normalize_score(conf_float, raw_max=100.0)
+                
+                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                bbox = [int(x), int(y), int(x + w), int(y + h)]
+                
+                regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
+                extracted_words.append(text)
+                
+            raw_text = self.pytesseract.image_to_string(image, config=mrz_config).strip()
+            if not raw_text and extracted_words:
+                raw_text = "\n".join(extracted_words)
+                
+            avg_conf = ConfidenceService.calculate_average_confidence(regions)
+            return OCRResult(raw_text=raw_text, regions=regions, average_confidence=avg_conf)
+            
+        except Exception as e:
+            logger.error(f"Tesseract MRZ OCR extraction (PSM {psm}) failed: {str(e)}")
+            raise RuntimeError(f"Tesseract MRZ execution error: {str(e)}")
+
+    def extract_field_text(self, image: np.ndarray, field_type: str, psm: int = 7) -> OCRResult:
+        """Targeted field OCR extraction for small crops (DOB, Gender) with whitelist and custom PSM."""
+        try:
+            if field_type.lower() == "dob":
+                whitelist = "0123456789/-. "
+            elif field_type.lower() == "gender":
+                whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/ "
+            else:
+                whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-. "
+
+            field_config = (
+                f'--oem 3 --psm {psm} '
+                f'-c tessedit_char_whitelist={whitelist} '
+                '-c load_system_dawg=0 '
+                '-c load_freq_dawg=0 '
+                '-c load_punc_dawg=0 '
+                '-c load_number_dawg=0 '
+                '-c load_bigram_dawg=0'
+            )
+            data = self.pytesseract.image_to_data(
+                image,
+                config=field_config,
+                output_type=self.pytesseract.Output.DICT
+            )
+            regions: List[OCRRegion] = []
+            extracted_words = []
+            n_boxes = len(data['text'])
+            for i in range(n_boxes):
+                text = str(data['text'][i]).strip()
+                conf_raw = data['conf'][i]
+                if not text or conf_raw == -1 or conf_raw == '-1':
+                    continue
+                try:
+                    conf_float = float(conf_raw)
+                except ValueError:
+                    conf_float = 0.0
+                norm_conf = ConfidenceService.normalize_score(conf_float, raw_max=100.0)
+                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                bbox = [int(x), int(y), int(x + w), int(y + h)]
+                regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
+                extracted_words.append(text)
+
+            raw_text = self.pytesseract.image_to_string(image, config=field_config).strip()
+            if not raw_text and extracted_words:
+                raw_text = " ".join(extracted_words)
+
+            avg_conf = ConfidenceService.calculate_average_confidence(regions)
+            return OCRResult(raw_text=raw_text, regions=regions, average_confidence=avg_conf)
+        except Exception as e:
+            logger.error(f"Tesseract field OCR extraction failed ({field_type}, PSM {psm}): {str(e)}")
+            raise RuntimeError(f"Tesseract field execution error: {str(e)}")
 
 
 class PaddleOCREngine(BaseOCREngine):
@@ -154,6 +270,35 @@ class PaddleOCREngine(BaseOCREngine):
             logger.error(f"PaddleOCR extraction failed: {str(e)}")
             raise RuntimeError(f"PaddleOCR execution error: {str(e)}")
 
+    def extract_mrz_text(self, image: np.ndarray, psm: int = 6) -> OCRResult:
+        res = self.extract_text(image)
+        allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<")
+        cleaned_regions = []
+        for r in res.regions:
+            clean_text = "".join(c for c in r.text.upper() if c in allowed or c in " \t")
+            if clean_text:
+                cleaned_regions.append(OCRRegion(text=clean_text, confidence=r.confidence, bbox=r.bbox))
+        clean_raw = "\n".join(r.text for r in cleaned_regions)
+        return OCRResult(raw_text=clean_raw, regions=cleaned_regions, average_confidence=res.average_confidence)
+
+    def extract_field_text(self, image: np.ndarray, field_type: str, psm: int = 7) -> OCRResult:
+        res = self.extract_text(image)
+        if field_type.lower() == "dob":
+            allowed = set("0123456789/-. ")
+        elif field_type.lower() == "gender":
+            allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/ ")
+        else:
+            allowed = None
+        if allowed is not None:
+            cleaned_regions = []
+            for r in res.regions:
+                clean_text = "".join(c for c in r.text if c in allowed)
+                if clean_text:
+                    cleaned_regions.append(OCRRegion(text=clean_text, confidence=r.confidence, bbox=r.bbox))
+            clean_raw = " ".join(r.text for r in cleaned_regions)
+            return OCRResult(raw_text=clean_raw, regions=cleaned_regions, average_confidence=res.average_confidence)
+        return res
+
 
 class MockOCREngine(BaseOCREngine):
     """Deterministic Mock OCR Engine for unit testing and standalone verification."""
@@ -180,6 +325,16 @@ class MockOCREngine(BaseOCREngine):
         raw_text = "PASSPORT\n" + "\n".join(r.text for r in default_regions)
         avg_conf = ConfidenceService.calculate_average_confidence(default_regions)
         return OCRResult(raw_text=raw_text, regions=default_regions, average_confidence=avg_conf)
+
+    def extract_mrz_text(self, image: np.ndarray, psm: int = 6) -> OCRResult:
+        if self.predefined_result is not None:
+            return self.predefined_result
+        return self.extract_text(image)
+
+    def extract_field_text(self, image: np.ndarray, field_type: str, psm: int = 7) -> OCRResult:
+        if self.predefined_result is not None:
+            return self.predefined_result
+        return self.extract_text(image)
 
 
 class OCRService:
@@ -217,5 +372,16 @@ class OCRService:
         return self._engine.engine_name
 
     def extract(self, image: np.ndarray) -> OCRResult:
-        """Executes OCR extraction on the processed image."""
+        """Executes general OCR extraction on the processed document image."""
         return self._engine.extract_text(image)
+
+    def extract_mrz(self, image: np.ndarray, psm: int = 6) -> OCRResult:
+        """Executes specialized MRZ OCR extraction with restricted whitelist, line segmentation, and dictionary disabled."""
+        return self._engine.extract_mrz_text(image, psm=psm)
+
+    def extract_field(self, image: np.ndarray, field_type: str, psm: int = 7) -> OCRResult:
+        """Executes targeted field OCR extraction with whitelist, line segmentation, and custom PSM."""
+        return self._engine.extract_field_text(image, field_type=field_type, psm=psm)
+
+
+
