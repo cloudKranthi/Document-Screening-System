@@ -16,14 +16,16 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
 @Table(name = "screenings")
 @Getter
 @Setter
-
+@NoArgsConstructor
 public class Screening {
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -32,17 +34,22 @@ public class Screening {
     private String claimedNationality;
 
     @Enumerated(EnumType.STRING)
-    private ScreeningStatus status=ScreeningStatus.IN_PROGRESS; // IN_PROGRESS, PASSED, SUSPICIOUS, FLAGGED_FOR_ADMIN
+    private ScreeningStatus status = ScreeningStatus.IN_PROGRESS;
 
     private Integer finalRiskScore; // 0 to 100
     private String riskCategory;    // LOW, MEDIUM, HIGH
 
-    @OneToOne(mappedBy = "screening", cascade =   CascadeType.ALL)
-    private DocumentRecord documentRecord;
+    @OneToOne(mappedBy = "screening", cascade = CascadeType.ALL, orphanRemoval = true)
+    private PassportRecord passportRecord;
 
-    @OneToOne(mappedBy = "screening", cascade = CascadeType.ALL)
+    @OneToOne(mappedBy = "screening", cascade = CascadeType.ALL, orphanRemoval = true)
+    private VisaRecord visaRecord;
+
+    @OneToOne(mappedBy = "screening", cascade = CascadeType.ALL, orphanRemoval = true)
+    private NationalIdRecord nationalIdRecord;
+
+    @OneToOne(mappedBy = "screening", cascade = CascadeType.ALL, orphanRemoval = true)
     private VerificationScore verificationScore;
-    
 
     @CreationTimestamp
     private LocalDateTime createdAt;
