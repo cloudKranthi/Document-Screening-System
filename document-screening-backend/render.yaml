@@ -1,0 +1,33 @@
+databases:
+  - name: document-screening-db
+    databaseName: document_screening
+    user: postgres
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: document-screening-backend
+    env: docker
+    rootDir: document-screening-backend
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    autoDeploy: true
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        fromDatabase:
+          name: document-screening-db
+          property: connectionString
+      - key: SPRING_DATASOURCE_USERNAME
+        fromDatabase:
+          name: document-screening-db
+          property: user
+      - key: SPRING_DATASOURCE_PASSWORD
+        fromDatabase:
+          name: document-screening-db
+          property: password
+      - key: ML_SERVICE_URL
+        value: http://localhost:8000
+      - key: FRONTEND_ALLOWED_ORIGINS
+        value: ""

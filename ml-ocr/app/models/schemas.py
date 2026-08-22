@@ -196,3 +196,31 @@ class HealthResponse(BaseModel):
     version: str = "1.0.0"
     service: str = "AI-Based Fake Identity & Document Screening - OCR Microservice"
     available_ocr_engines: List[str]
+
+
+class FaceDetail(BaseModel):
+    """Details regarding a detected face in document portrait or selfie."""
+    detected: bool = False
+    detection_confidence: Optional[float] = None
+    quality_score: Optional[float] = None
+    quality_passed: Optional[bool] = None
+    bbox: Optional[List[int]] = None
+    warnings: List[str] = Field(default_factory=list)
+
+
+class FaceVerificationResult(BaseModel):
+    """Face verification comparison result between identity document and selfie."""
+    success: bool = True
+    status: str  # MATCH, NO_MATCH, INSUFFICIENT_QUALITY, NO_FACE, MULTIPLE_FACES, PROCESSING_ERROR
+    match: Optional[bool] = None
+    similarity_score: Optional[float] = None
+    raw_cosine_similarity: Optional[float] = None
+    threshold: float = 0.75
+    match_band: Optional[str] = None  # STRONG_MATCH, BORDERLINE_MATCH, MANUAL_REVIEW, NO_MATCH, NOT_EVALUATED
+    ui_color: Optional[str] = None    # GREEN, YELLOW, ORANGE, RED, GRAY
+    document_face: FaceDetail
+    selfie_face: FaceDetail
+    warnings: List[str] = Field(default_factory=list)
+    disclaimer: str = "Face similarity is a biometric comparison signal and does not by itself prove identity or document authenticity."
+
+

@@ -81,7 +81,21 @@ class Settings(BaseSettings):
     # Security
     MASK_PII_LOGS: bool = True
 
+    # Face Verification settings
+    FACE_MATCH_THRESHOLD: float = 0.75  # Configurable prototype match threshold
+    FACE_MIN_SIZE: int = 60             # Minimum face width/height in pixels
+    FACE_BLUR_THRESHOLD: float = 40.0   # Minimum Laplacian variance for sharpness
+    FACE_MIN_BRIGHTNESS: float = 30.0   # Minimum mean pixel intensity (underexposure)
+    FACE_MAX_BRIGHTNESS: float = 240.0  # Maximum mean pixel intensity (overexposure)
+    FACE_DETECTION_CONF_THRESHOLD: float = 0.60
+    FACE_DETECTOR_MODEL: str = "yunet"
+    FACE_RECOGNIZER_MODEL: str = "sface"
+    FACE_MODEL_DIR: str = "app/models/weights"
+    FACE_DEVICE: str = "cpu"
+    FACE_MAX_UPLOAD_SIZE_MB: int = 15
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
 
 
 

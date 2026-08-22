@@ -1,8 +1,35 @@
+server:
+  port: ${PORT:8080}
+
 spring:
   application:
-    name: document-screening
+    name: document-screening-service
+
   datasource:
-    url: jdbc:postgresql://localhost:5432/document_screening
-    username: postgres
-    password: Shiva@37
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/document_screening}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:Shiva@37}
     driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 60MB
+
+ml-service:
+  base-url: ${ML_SERVICE_URL:http://localhost:8000}
+  connect-timeout: 10000
+  read-timeout: 60000
+
+app:
+  cors:
+    allowed-origins: ${FRONTEND_ALLOWED_ORIGINS:}
