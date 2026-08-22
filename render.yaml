@@ -3,17 +3,17 @@ databases:
     databaseName: document_screening
     user: postgres
     plan: free
-    region: oregon # or frankfurt / singapore
+    region: oregon
 
 services:
   - type: web
     name: document-screening-backend
     env: docker
-    dockerfilePath: ./Dockerfile
+    rootDir: document-screening-backend
+    dockerfilePath: Dockerfile
     plan: free
     region: oregon
     autoDeploy: true
-    healthCheckPath: /actuator/health
     envVars:
       - key: SPRING_DATASOURCE_URL
         fromDatabase:
@@ -28,6 +28,6 @@ services:
           name: document-screening-db
           property: password
       - key: ML_SERVICE_URL
-        value: http://localhost:8000 # Update to your friend's deployed ML URL once live
+        value: http://localhost:8000
       - key: FRONTEND_ALLOWED_ORIGINS
-        value: "" # Leave empty for now; add frontend domain when deployed
+        value: ""
