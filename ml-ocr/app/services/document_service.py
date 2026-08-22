@@ -127,16 +127,142 @@ class BaseDocumentExtractor(ABC):
 
 
 class PassportExtractor(BaseDocumentExtractor):
-    """Structured field extractor for Passports."""
+    """Structured field extractor for Passports supporting dual-source visual and MRZ analysis."""
 
     def __init__(self):
         self.last_field_sources: Dict[str, Dict[str, Any]] = {}
         self.last_field_debug: Optional[Dict[str, Any]] = None
         self.last_warnings: List[str] = []
+        self.last_visual_fields: Dict[str, Any] = {}
+        self.last_visual_confs: Dict[str, float] = {}
 
     @property
     def document_type(self) -> str:
         return DocumentTypeEnum.PASSPORT.value
+
+    @classmethod
+    def _is_valid_date(cls, date_str: str) -> bool:
+        """Validates that a date string is a plausible calendar date."""
+        if not date_str:
+            return False
+        clean = date_str.strip()
+        m = re.match(r'^([0-9]{1,2})[/.-]([0-9]{1,2})[/.-]([0-9]{2,4})$', clean)
+        if m:
+            d, mth = int(m.group(1)), int(m.group(2))
+            return 1 <= d <= 31 and 1 <= mth <= 12
+        return False
+
+    def extract_visual_fields(
+        self,
+        ocr_text: str,
+        ocr_regions: Optional[List[OCRRegion]] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        """Extracts fields independently from the visual zone of a passport."""
+        vis_fields: Dict[str, Any] = {}
+        vis_confs: Dict[str, float] = {}
+        sorted_regions = sorted(ocr_regions, key=lambda r: (r.bbox[1], r.bbox[0])) if ocr_regions else []
+
+        # 1. Passport / Document Number
+        pass_patterns = [
+            r'(?:Passport\s*No|Passport\s*Number|Passeport\s*No|Passport\s*/\s*Passeport|Doc\s*No|Document\s*No|Passport\s*#)[:\s]+([A-Z0-9]{7,12})',
+            r'\bPassport[:\s]+([A-Z0-9]{7,12})',
+        ]
+        for pat in pass_patterns:
+            m = re.search(pat, ocr_text, re.IGNORECASE)
+            if m:
+                cand = m.group(1).strip().upper()
+                vis_fields["passport_number"] = cand
+                vis_confs["passport_number"] = self._find_region_confidence(cand, sorted_regions)
+                break
+        if "passport_number" not in vis_fields and sorted_regions:
+            val, conf = self._extract_spatial_value(
+                sorted_regions,
+                label_patterns=[r'\b(?:Passport\s*No|Passport\s*Number|Passeport|Document\s*No|Passport)\b'],
+                val_pattern=r'([A-Z0-9]{7,12})'
+            )
+            if val:
+                vis_fields["passport_number"] = val.strip().upper()
+                vis_confs["passport_number"] = conf
+
+        # 2. Date of Birth
+        dob_patterns = [
+            r'(?:Date\s*of\s*Birth|Birth\s*Date|DOB|Date\s*de\s*naissance)[:\s]+([0-9]{2}[/.-][0-9]{2}[/.-][0-9]{4}|[0-9]{2}\s+[A-Za-z]{3,9}\s+[0-9]{4}|[0-9]{4}[/.-][0-9]{2}[/.-][0-9]{2})',
+        ]
+        for pat in dob_patterns:
+            m = re.search(pat, ocr_text, re.IGNORECASE)
+            if m:
+                cand = m.group(1).strip()
+                vis_fields["date_of_birth"] = cand
+                vis_confs["date_of_birth"] = self._find_region_confidence(cand, sorted_regions)
+                break
+        if "date_of_birth" not in vis_fields and sorted_regions:
+            val, conf = self._extract_spatial_value(
+                sorted_regions,
+                label_patterns=[r'\b(?:Date\s*of\s*Birth|Birth\s*Date|DOB|Date\s*de\s*naissance)\b'],
+                val_pattern=r'([0-9]{2}[/.-][0-9]{2}[/.-][0-9]{4}|[0-9]{2}\s+[A-Za-z]{3,9}\s+[0-9]{4}|[0-9]{4}[/.-][0-9]{2}[/.-][0-9]{2})'
+            )
+            if val:
+                vis_fields["date_of_birth"] = val.strip()
+                vis_confs["date_of_birth"] = conf
+
+        # 3. Date of Expiry
+        exp_patterns = [
+            r'(?:Date\s*of\s*Expiry|Expiry\s*Date|Expiration\s*Date|Date\s*d\'\s*expiration|Expires)[:\s]+([0-9]{2}[/.-][0-9]{2}[/.-][0-9]{4}|[0-9]{2}\s+[A-Za-z]{3,9}\s+[0-9]{4}|[0-9]{4}[/.-][0-9]{2}[/.-][0-9]{2})',
+        ]
+        for pat in exp_patterns:
+            m = re.search(pat, ocr_text, re.IGNORECASE)
+            if m:
+                cand = m.group(1).strip()
+                vis_fields["date_of_expiry"] = cand
+                vis_confs["date_of_expiry"] = self._find_region_confidence(cand, sorted_regions)
+                break
+        if "date_of_expiry" not in vis_fields and sorted_regions:
+            val, conf = self._extract_spatial_value(
+                sorted_regions,
+                label_patterns=[r'\b(?:Date\s*of\s*Expiry|Expiry\s*Date|Expiration\s*Date|Date\s*d\'\s*expiration|Expires)\b'],
+                val_pattern=r'([0-9]{2}[/.-][0-9]{2}[/.-][0-9]{4}|[0-9]{2}\s+[A-Za-z]{3,9}\s+[0-9]{4}|[0-9]{4}[/.-][0-9]{2}[/.-][0-9]{2})'
+            )
+            if val:
+                vis_fields["date_of_expiry"] = val.strip()
+                vis_confs["date_of_expiry"] = conf
+
+        # 4. Name / Surname / Given Names
+        sur_match = re.search(r'(?:Surname|Nom)[:\s]+([A-Z\s\'-]{2,30})', ocr_text, re.IGNORECASE)
+        giv_match = re.search(r'(?:Given\s*Names|Given\s*Name|Prénoms|Prenoms|First\s*Name)[:\s]+([A-Z\s\'-]{2,40})', ocr_text, re.IGNORECASE)
+        if sur_match:
+            cand_sur = sur_match.group(1).strip()
+            vis_fields["surname"] = cand_sur
+            vis_confs["surname"] = self._find_region_confidence(cand_sur, sorted_regions)
+        if giv_match:
+            cand_giv = giv_match.group(1).strip()
+            vis_fields["given_names"] = cand_giv
+            vis_confs["given_names"] = self._find_region_confidence(cand_giv, sorted_regions)
+        if "surname" in vis_fields and "given_names" in vis_fields:
+            vis_fields["name"] = f"{vis_fields['surname']} {vis_fields['given_names']}".strip()
+            vis_confs["name"] = min(vis_confs.get("surname", 0.85), vis_confs.get("given_names", 0.85))
+        else:
+            name_match = re.search(r'(?:Full\s*Name|Name|Nom\s*complet)[:\s]+([A-Z\s\'-]{3,50})', ocr_text, re.IGNORECASE)
+            if name_match:
+                cand_n = name_match.group(1).strip()
+                vis_fields["name"] = cand_n
+                vis_confs["name"] = self._find_region_confidence(cand_n, sorted_regions)
+
+        # 5. Sex / Gender
+        sex_match = re.search(r'(?:Sex|Gender|Sexe)[:\s]+([MFX]|MALE|FEMALE|HOMME|FEMME)', ocr_text, re.IGNORECASE)
+        if sex_match:
+            raw_s = sex_match.group(1).upper()
+            val_s = "M" if "M" in raw_s and "F" not in raw_s else ("F" if "F" in raw_s else "X")
+            vis_fields["sex"] = val_s
+            vis_confs["sex"] = self._find_region_confidence(sex_match.group(0), sorted_regions)
+
+        # 6. Nationality
+        nat_match = re.search(r'(?:Nationality|Nationalité)[:\s]+([A-Z]{3}|[A-Za-z\s]{3,20})', ocr_text, re.IGNORECASE)
+        if nat_match:
+            cand_nat = nat_match.group(1).strip().upper()
+            vis_fields["nationality"] = cand_nat[:3] if len(cand_nat) == 3 else cand_nat
+            vis_confs["nationality"] = self._find_region_confidence(cand_nat, sorted_regions)
+
+        return vis_fields, vis_confs
 
     def extract_fields(
         self,
@@ -152,10 +278,15 @@ class PassportExtractor(BaseDocumentExtractor):
         self.last_warnings = []
         self.last_field_debug = None
 
+        # Extract visual zone fields independently
+        vis_fields, vis_confs = self.extract_visual_fields(ocr_text, ocr_regions)
+        self.last_visual_fields = vis_fields
+        self.last_visual_confs = vis_confs
+
         fields: Dict[str, Any] = {}
         confidences: Dict[str, float] = {}
         
-        # Primary source: MRZ fields
+        # Primary source: MRZ fields (when present)
         if mrz_fields:
             fields["surname"] = mrz_fields.get("surname", "")
             fields["given_names"] = mrz_fields.get("given_names", "")
@@ -178,33 +309,16 @@ class PassportExtractor(BaseDocumentExtractor):
 
             return fields, confidences
 
-        # Fallback regex extraction from visual text if MRZ was absent/damaged
-        passport_num_match = re.search(
-            r'(?:Passport No|Passport Number|Document No|Passport/Passeport|Passeport No|Passport\s*#)[:\s]+([A-Z0-9]{8,9})',
-            ocr_text,
-            re.IGNORECASE
-        )
-        fields["passport_number"] = passport_num_match.group(1) if passport_num_match else ""
-            
-        dob_match = re.search(r'(?:DOB|Date of Birth|Birth Date)[:\s]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4}|[0-9]{4}[/-][0-9]{2}[/-][0-9]{2})', ocr_text, re.IGNORECASE)
-        if dob_match:
-            fields["date_of_birth"] = dob_match.group(1)
-
-        expiry_match = re.search(r'(?:Date of Expiry|Expiry Date|Expires)[:\s]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4}|[0-9]{4}[/-][0-9]{2}[/-][0-9]{2})', ocr_text, re.IGNORECASE)
-        if expiry_match:
-            fields["date_of_expiry"] = expiry_match.group(1)
-
-        sex_match = re.search(r'(?:Sex|Gender)[:\s]+([MFX]|MALE|FEMALE)', ocr_text, re.IGNORECASE)
-        if sex_match:
-            val = sex_match.group(1).upper()
-            fields["sex"] = "M" if "M" in val else ("F" if "F" in val else "X")
-
+        # Fallback to visual fields if MRZ was absent/damaged
+        fields.update(vis_fields)
+        confidences.update(vis_confs)
         for k, v in fields.items():
             if v:
-                confidences[k] = 0.85
-                self.last_field_sources[k] = {"value": v, "source": "visual_ocr", "confidence": 0.85}
+                conf = confidences.get(k, 0.85)
+                self.last_field_sources[k] = {"value": v, "source": "visual_ocr", "confidence": conf}
 
         return fields, confidences
+
 
 
 class VisaExtractor(BaseDocumentExtractor):
@@ -215,6 +329,9 @@ class VisaExtractor(BaseDocumentExtractor):
         self.last_field_sources: Dict[str, Dict[str, Any]] = {}
         self.last_field_debug: Optional[Dict[str, Any]] = None
         self.last_warnings: List[str] = []
+        self.last_visual_fields: Dict[str, Any] = {}
+        self.last_visual_confs: Dict[str, float] = {}
+
 
     @property
     def document_type(self) -> str:
@@ -624,7 +741,10 @@ class VisaExtractor(BaseDocumentExtractor):
                     if self.last_field_debug is not None:
                         self.last_field_debug["discrepancies"].append({"field": "name", "visual": vis_name, "mrz": mrz_name})
 
+        self.last_visual_fields = vis_fields
+        self.last_visual_confs = vis_confs
         return fields, confidences
+
 
 
 
@@ -1514,8 +1634,11 @@ class DocumentService:
 
         field_debug_info = getattr(extractor, "last_field_debug", None)
         field_sources_info = getattr(extractor, "last_field_sources", None)
+        self.last_visual_fields = getattr(extractor, "last_visual_fields", None) or fields
+        self.last_visual_confs = getattr(extractor, "last_visual_confs", None) or confidences
             
         return effective_type, fields, confidences, warnings, field_debug_info, field_sources_info
+
 
 
 

@@ -98,6 +98,71 @@ class FieldSourceItem(BaseModel):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence score for this field (0.0 to 1.0)")
 
 
+class FieldComparisonItem(BaseModel):
+    """Comparison result for an individual document field between visual OCR and MRZ."""
+    field: str = Field(default="", description="Field identifier (e.g. date_of_birth, document_number)")
+    visual: str = Field(default="", description="Extracted visual zone value")
+    mrz: str = Field(default="", description="Extracted MRZ value")
+    visual_value: str = Field(default="", description="Alias for visual value")
+    mrz_value: str = Field(default="", description="Alias for MRZ value")
+    normalized_visual: str = Field(default="", description="Normalized visual value for comparison")
+    normalized_mrz: str = Field(default="", description="Normalized MRZ value for comparison")
+    match: bool = Field(..., description="Whether normalized visual and MRZ field values match")
+    visual_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="OCR confidence for visual field")
+    mrz_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confidence for MRZ field")
+    comparison_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confidence of the comparison (min of visual and MRZ confidences)")
+    confidence_visual: float = Field(default=0.0, ge=0.0, le=1.0, description="Alias for visual_confidence")
+    confidence_mrz: float = Field(default=0.0, ge=0.0, le=1.0, description="Alias for mrz_confidence")
+    mismatch_severity: str = Field(default="NONE", description="Severity if mismatch: 'NONE', 'LOW', 'MEDIUM', 'HIGH'")
+    note: Optional[str] = Field(default=None, description="Explanatory note regarding formatting or normalization")
+
+
+
+class TamperingIndicator(BaseModel):
+    """Specific explainable evidence indicator of potential document tampering."""
+    type: str = Field(..., description="Signal type: document_consistency_mismatch, compression_inconsistency, noise_inconsistency, edge_texture_inconsistency, copy_move, metadata_anomaly")
+    score: float = Field(..., ge=0.0, le=1.0, description="Normalized anomaly score (0.0 = clean, 1.0 = highly anomalous)")
+    severity: str = Field(..., description="Indicator severity: LOW, MEDIUM, or HIGH")
+    regions: List[List[int]] = Field(default_factory=list, description="Suspicious bounding box regions [[x1, y1, x2, y2], ...]")
+    explanation: str = Field(..., description="Human-readable explainable description of the observed anomaly or inconsistency")
+    details: Optional[Dict[str, Any]] = Field(default=None, description="Optional supporting quantitative metrics")
+
+
+class TamperingSignalDetail(BaseModel):
+    """Detailed result for an individual tampering signal analyzer."""
+    score: float = Field(..., ge=0.0, le=1.0, description="Normalized signal anomaly score (0.0 to 1.0)")
+    weight: float = Field(..., ge=0.0, le=1.0, description="Weight assigned to this signal in overall fusion")
+    evaluated: bool = Field(default=True, description="Whether this signal was evaluated")
+    evidence_confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Reliability/confidence of this forensic signal's evidence (0.0 to 1.0)")
+    reason: str = Field(default="EVALUATED", description="Status code/reason: 'EVALUATED', 'NO_ANOMALY_FOUND', 'INSUFFICIENT_EVIDENCE', 'NO_METADATA', 'FEATURE_NOT_APPLICABLE'")
+    summary: str = Field(..., description="Brief summary of signal findings")
+    regions: List[List[int]] = Field(default_factory=list, description="Suspicious bounding box regions associated with this signal")
+    suspicious_regions: Optional[List[List[int]]] = Field(default=None, description="Alias for suspicious bounding box regions [[x1, y1, x2, y2], ...]")
+    metrics: Optional[Dict[str, Any]] = Field(default=None, description="Signal-specific quantitative measurements")
+    comparisons: Optional[Dict[str, FieldComparisonItem]] = Field(default=None, description="Per-field visual vs MRZ consistency comparison results")
+    editing_software_detected: Optional[bool] = Field(default=None, description="Whether digital image manipulation software was identified in metadata")
+    software: Optional[str] = Field(default=None, description="Identified image editing software name or signature")
+
+
+class TamperingResult(BaseModel):
+    """Comprehensive explainable document tampering risk assessment."""
+    tampering_risk_score: float = Field(..., ge=0.0, le=1.0, description="Overall weighted tampering risk score (0.0 to 1.0)")
+    risk_level: str = Field(..., description="Overall risk category: LOW (<0.30), MEDIUM (0.30-0.64), or HIGH (>=0.65)")
+    evidence_coverage: float = Field(default=1.0, ge=0.0, le=1.0, description="Forensic evidence availability coverage ratio (0.0 to 1.0)")
+    signals: Dict[str, TamperingSignalDetail] = Field(default_factory=dict, description="Individual signal evaluation details")
+    indicators: List[TamperingIndicator] = Field(default_factory=list, description="List of specific suspicious localized anomalies detected")
+    warnings: List[str] = Field(default_factory=list, description="Caveats, image quality notes, or evaluation disclaimers")
+    consistency_debug: Optional[Dict[str, Any]] = Field(default=None, description="Diagnostic debug metadata for cross-zone OCR and MRZ consistency analysis")
+    debug: Optional[Dict[str, Any]] = Field(default=None, description="Detailed diagnostic evaluation debug metadata")
+    disclaimer: str = Field(
+        default="Tampering risk represents statistical and metadata anomalies and does not constitute absolute proof of forgery or authenticity.",
+        description="Legal and operational disclaimer"
+    )
+
+
+
+
+
 class OCRExtractResponse(BaseModel):
     """Top-level response model for POST /api/v1/ocr/extract."""
     success: bool = Field(..., description="Indicates if extraction completed successfully")
@@ -113,8 +178,10 @@ class OCRExtractResponse(BaseModel):
     processing: ProcessingMetadata = Field(..., description="Image preprocessing and boundary detection metadata")
     language_mode: str = Field(default="english_first", description="Language processing strategy used for visual OCR field extraction")
     warnings: List[str] = Field(default_factory=list, description="Informational warnings or diagnostic notes regarding extraction")
+    tampering: Optional[TamperingResult] = Field(default=None, description="Optional explainable document tampering risk assessment if requested")
     mrz_debug: Optional[Dict[str, Any]] = Field(None, description="Optional debug metadata containing candidate crops, scores, and best candidate details")
     field_debug: Optional[Dict[str, Any]] = Field(None, description="Optional debug metadata for second-pass field extraction candidates")
+
 
 
 

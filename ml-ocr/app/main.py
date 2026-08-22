@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, ocr
+from app.api.routes import health, ocr, tampering
 from app.config import settings
 from app.utils.logger import get_logger
 
@@ -61,6 +61,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router, prefix="")
 app.include_router(health.router, prefix=settings.API_V1_PREFIX)
 app.include_router(ocr.router, prefix=settings.API_V1_PREFIX)
+app.include_router(tampering.router, prefix=settings.API_V1_PREFIX)
+app.include_router(tampering.router, prefix="")
+
 
 
 @app.get("/", tags=["Root"])

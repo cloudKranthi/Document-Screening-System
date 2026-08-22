@@ -44,11 +44,46 @@ class Settings(BaseSettings):
     NATIONAL_ID_CONFIDENCE_THRESHOLD: float = 0.50
     DEFAULT_LANGUAGE_MODE: str = "english_first"
     
+    # Tampering Detection settings
+    TAMPERING_ENABLED: bool = True
+    TAMPERING_ELA_QUALITY: int = 92  # Controlled JPEG recompression quality (90-95)
+    TAMPERING_ELA_WEIGHT: float = 0.35
+    TAMPERING_NOISE_WEIGHT: float = 0.15
+    TAMPERING_EDGE_WEIGHT: float = 0.10
+    TAMPERING_COPY_MOVE_WEIGHT: float = 0.15
+    TAMPERING_METADATA_WEIGHT: float = 0.10
+    TAMPERING_CONSISTENCY_WEIGHT: float = 0.35
+    TAMPERING_COMPRESSION_WEIGHT: float = 0.35  # Backward-compatible alias for ELA weight
+    TAMPERING_LOW_THRESHOLD: float = 0.30   # 0.00 - 0.29: LOW
+    TAMPERING_HIGH_THRESHOLD: float = 0.65  # 0.30 - 0.64: MEDIUM, >= 0.65: HIGH
+    TAMPERING_BLOCK_SIZE: int = 32
+
+
+    TAMPERING_EDITING_SOFTWARE_KEYWORDS: List[str] = [
+        "adobe photoshop",
+        "photoshop",
+        "gimp",
+        "gnu image manipulation program",
+        "lightroom",
+        "affinity photo",
+        "paint.net",
+        "photopea",
+        "coreldraw",
+        "pixelmator",
+        "canva",
+        "indesign",
+        "picsart",
+        "snapseed",
+        "pixlr",
+        "seashore"
+    ]
+    
     # Security
     MASK_PII_LOGS: bool = True
 
-
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 
 
 settings = Settings()
