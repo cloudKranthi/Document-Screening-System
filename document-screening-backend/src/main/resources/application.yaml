@@ -1,3 +1,8 @@
 spring:
   application:
     name: document-screening
+  datasource:
+    url: jdbc:postgresql://localhost:5432/document_screening
+    username: postgres
+    password: Shiva@37
+    driver-class-name: org.postgresql.Driver

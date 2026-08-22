@@ -2,9 +2,12 @@ package com.sih.document_screening.service;
 
 import com.sih.document_screening.dto.BiometricTamperingResponse;
 import com.sih.document_screening.dto.MlOcrResponse;
+import com.sih.document_screening.dto.NationalIdOcr;
+import com.sih.document_screening.dto.PassportOcr;
 import com.sih.document_screening.dto.ScreeningFinalDecision;
 import com.sih.document_screening.dto.ScreeningInitResponse;
 import com.sih.document_screening.dto.ScreeningSummaryDTO;
+import com.sih.document_screening.dto.VisaOcr;
 import com.sih.document_screening.model.NationalIdRecord;
 import com.sih.document_screening.model.PassportRecord;
 import com.sih.document_screening.model.Screening;
@@ -205,7 +208,7 @@ public class ScreeningService {
     }
 
     // Mapping Helpers
-    private PassportRecord mapToPassportRecord(MlOcrResponse.PassportOcr ocr, Screening screening) {
+    private PassportRecord mapToPassportRecord(PassportOcr ocr, Screening screening) {
         PassportRecord p = new PassportRecord();
         p.setScreening(screening);
         if (ocr != null) {
@@ -221,7 +224,7 @@ public class ScreeningService {
         return p;
     }
 
-    private VisaRecord mapToVisaRecord(MlOcrResponse.VisaOcr ocr, Screening screening) {
+    private VisaRecord mapToVisaRecord(VisaOcr ocr, Screening screening) {
         VisaRecord v = new VisaRecord();
         v.setScreening(screening);
         if (ocr != null) {
@@ -233,7 +236,7 @@ public class ScreeningService {
         return v;
     }
 
-    private NationalIdRecord mapToNationalIdRecord(MlOcrResponse.NationalIdOcr ocr, Screening screening) {
+    private NationalIdRecord mapToNationalIdRecord(NationalIdOcr ocr, Screening screening) {
         NationalIdRecord n = new NationalIdRecord();
         n.setScreening(screening);
         if (ocr != null) {

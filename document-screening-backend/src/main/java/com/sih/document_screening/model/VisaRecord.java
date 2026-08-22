@@ -22,8 +22,9 @@ public class VisaRecord {
     private Screening screening;
 
     private String visaNumber;
-    private String visaType;
     private LocalDate validUntil;
+    @Enumerated(EnumType.STRING)
+    private VisaType visaType;
     private Integer stayDurationDays;
     
     private Double ocrConfidence;
