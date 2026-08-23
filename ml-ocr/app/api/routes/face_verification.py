@@ -84,11 +84,14 @@ async def verify_faces(
     selfie_img = await _read_and_validate_image(selfie_image, "selfie_image")
 
     try:
-        result = verification_service.verify_faces(
+        from starlette.concurrency import run_in_threadpool
+        result = await run_in_threadpool(
+            verification_service.verify_faces,
             document_image=doc_img,
             selfie_image=selfie_img
         )
         return result
+
     except Exception as e:
         logger.error(f"Unhandled exception during face verification: {str(e)}", exc_info=True)
         return FaceVerificationResult(

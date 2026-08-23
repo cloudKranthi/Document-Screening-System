@@ -98,9 +98,11 @@ async def screen_document(
             logger.warning(f"Selfie read note: {e}")
             selfie_bytes = None
 
-    # 4. Delegate to ScreeningService
+    # 4. Delegate to ScreeningService off the asyncio event loop
     try:
-        result = screening_service.screen(
+        from starlette.concurrency import run_in_threadpool
+        result = await run_in_threadpool(
+            screening_service.screen,
             document_bytes=raw_doc_bytes,
             selfie_bytes=selfie_bytes,
             document_type=document_type
@@ -111,6 +113,7 @@ async def screen_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve)
         )
+
     except Exception as exc:
         logger.error(f"Screening pipeline execution error: {exc}")
         raise HTTPException(

@@ -151,6 +151,9 @@ class ScreeningService:
                 warnings=extraction_warnings
             )
             ocr_data = ocr_extract_resp.model_dump()
+            
+            # Explicitly release intermediate OCR image arrays to reclaim memory before tampering analysis
+            del ocr_optimized_img
         except Exception as ocr_err:
             logger.error(f"OCR extraction failed during screening: {ocr_err}")
             all_warnings.append(f"OCR extraction error: {str(ocr_err)}")
@@ -160,6 +163,7 @@ class ScreeningService:
                 "fields": {},
                 "warnings": [f"OCR extraction error: {str(ocr_err)}"]
             }
+
 
         # -------------------------------------------------------------
         # 3. Multi-Signal Tampering Forensics

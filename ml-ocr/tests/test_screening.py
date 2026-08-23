@@ -398,3 +398,50 @@ class TestUnifiedScreeningEndpoint:
             }
         )
         assert response.status_code == 400
+
+    def test_health_check_is_lightweight_and_fast(self, client):
+        """Verifies GET /health returns static 200 OK immediately with no blocking operations."""
+        import time
+        start_time = time.perf_counter()
+        response = client.get("/health")
+        elapsed = time.perf_counter() - start_time
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "version" in data
+        assert "service" in data
+        assert "available_ocr_engines" in data
+        # Health check must respond in well under 100ms
+        assert elapsed < 0.100
+
+    def test_face_verification_module_failure_tolerance(self, client, mock_passport_ocr):
+        """If face verification module raises an unexpected exception, screening still succeeds with OCR and Tampering."""
+        class CrashingFaceService(FaceVerificationService):
+            def verify_faces(self, *args, **kwargs):
+                raise RuntimeError("Face embedding engine timeout")
+
+        app.dependency_overrides[get_face_verification_service] = lambda: CrashingFaceService()
+
+        try:
+            doc_bytes = _draw_synthetic_document_image("PASSPORT")
+            selfie_bytes = _draw_synthetic_selfie_image()
+
+            response = client.post(
+                "/api/v1/screen",
+                files={
+                    "document_image": ("passport.jpg", doc_bytes, "image/jpeg"),
+                    "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
+                }
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["ocr"]["success"] is True
+            assert data["face_verification"]["status"] == "PROCESSING_ERROR"
+            assert any("Face verification" in w for w in data["warnings"])
+        finally:
+            app.dependency_overrides.pop(get_face_verification_service, None)
+
+
