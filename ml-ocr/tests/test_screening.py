@@ -521,8 +521,35 @@ class TestUnifiedScreeningEndpoint:
                 files={"document_image": ("doc.jpg", doc_bytes, "image/jpeg")}
             )
             assert response.status_code == 200
-            # 1 primary OCR + 1 targeted crop + at most MAX_MRZ_FALLBACK_ATTEMPTS (3) = <= 5 calls total
+            # 1 primary OCR + 1 targeted crop + at most MAX_MRZ_FALLBACK_ATTEMPTS (2) = <= 4 calls total
             assert calls["extract"] == 1
             assert calls["extract_mrz"] <= (1 + settings.MAX_MRZ_FALLBACK_ATTEMPTS)
         finally:
             app.dependency_overrides.pop(get_ocr_service, None)
+
+    def test_ocr_pass_timeout_returns_clean_module_error(self, client):
+        """Scenario 19: If an individual OCR pass times out, screening returns 200 with clean module error info."""
+        class TimingOutEngine(MockOCREngine):
+            def extract_text(self, image):
+                raise TimeoutError("Tesseract process timeout (30s)")
+
+        custom_ocr_service = OCRService(engine=TimingOutEngine())
+        app.dependency_overrides[get_ocr_service] = lambda: custom_ocr_service
+
+        try:
+            doc_bytes = _draw_synthetic_document_image("PASSPORT")
+            response = client.post(
+                "/api/v1/screen",
+                data={"document_type": "passport"},
+                files={"document_image": ("doc.jpg", doc_bytes, "image/jpeg")}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["ocr"]["success"] is False
+            assert "timeout" in data["ocr"]["error"].lower()
+            assert any("timed out" in w.lower() for w in data["warnings"])
+        finally:
+            app.dependency_overrides.pop(get_ocr_service, None)
+

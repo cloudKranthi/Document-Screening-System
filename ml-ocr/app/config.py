@@ -36,12 +36,13 @@ class Settings(BaseSettings):
     # OCR Engine settings
     OCR_ENGINE: str = os.getenv("OCR_ENGINE", "auto")  # "paddleocr", "tesseract", "auto", "mock"
     TESSERACT_CMD: str = os.getenv("TESSERACT_CMD", "")
-    TESSERACT_TIMEOUT_SECONDS: int = 5
+    TESSERACT_TIMEOUT_SECONDS: int = int(os.getenv("TESSERACT_TIMEOUT_SECONDS", "30"))
     
     # MRZ Processing settings
     MRZ_CROP_RATIOS: List[float] = [0.20, 0.25, 0.30, 0.35, 0.40]
     MRZ_UPSCALE_FACTOR: float = 3.0
-    MAX_MRZ_FALLBACK_ATTEMPTS: int = 3
+    MAX_MRZ_FALLBACK_ATTEMPTS: int = int(os.getenv("MAX_MRZ_FALLBACK_ATTEMPTS", "2"))
+
 
     
     # National ID / Visual OCR settings

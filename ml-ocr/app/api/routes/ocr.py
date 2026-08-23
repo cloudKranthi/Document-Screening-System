@@ -78,12 +78,19 @@ async def extract_document_info(
     raw_bytes = await ImageService.validate_and_read_upload(file)
 
     def _sync_extract():
+        import time
         # Step 3 to 12: Image preprocessing pipeline (decode, resize, boundary detect, warp, enhance)
+        t_pre_start = time.perf_counter()
         original_img, ocr_optimized_img, processing_meta = ImageService.process_document_image(raw_bytes)
+        t_pre = (time.perf_counter() - t_pre_start) * 1000.0
+        logger.info(f"[TIMING] preprocess completed in {t_pre:.2f}ms")
 
         # Step 13: General OCR Execution (Full Document)
         try:
+            t_prim_start = time.perf_counter()
             ocr_result = ocr_srv.extract(ocr_optimized_img)
+            t_prim = (time.perf_counter() - t_prim_start) * 1000.0
+            logger.info(f"[TIMING] primary OCR completed in {t_prim:.2f}ms (conf: {ocr_result.average_confidence:.3f})")
         except Exception as e:
             logger.error(f"General OCR execution failed: {str(e)}")
             raise e
@@ -104,6 +111,7 @@ async def extract_document_info(
 
         # Stage 2: Single targeted MRZ crop only if MRZ not detected or invalid
         if not (mrz_result.detected and mrz_result.overall_valid):
+            t_mrz_start = time.perf_counter()
             try:
                 from app.utils.image_utils import extract_mrz_region, preprocess_mrz_crop
                 target_crop = extract_mrz_region(ocr_optimized_img, bottom_ratio=0.35)
@@ -112,6 +120,8 @@ async def extract_document_info(
                     clahe_name, clahe_img = prep_variants[0]
                     try:
                         mrz_ocr_res = ocr_srv.extract_mrz(clahe_img, psm=6)
+                        t_mrz = (time.perf_counter() - t_mrz_start) * 1000.0
+                        logger.info(f"[TIMING] MRZ OCR completed in {t_mrz:.2f}ms")
                         if mrz_ocr_res.raw_text.strip():
                             mrz_candidate_sources.append((f"crop_0.35_{clahe_name}_psm6", mrz_ocr_res.raw_text))
                             mrz_result, mrz_fields, mrz_debug_info = MRZService.extract_and_validate_mrz(
@@ -120,6 +130,8 @@ async def extract_document_info(
                                 mrz_candidate_texts=mrz_candidate_sources,
                                 include_debug=should_debug
                             )
+                    except TimeoutError as te:
+                        logger.warning(f"Targeted MRZ OCR pass timed out: {te}")
                     except Exception as e:
                         logger.warning(f"Targeted MRZ crop OCR failed: {e}")
             except Exception as crop_err:
@@ -128,7 +140,7 @@ async def extract_document_info(
         # Stage 3: Limited fallback variants only if MRZ is STILL not valid
         if not (mrz_result.detected and mrz_result.overall_valid):
             from app.utils.image_utils import extract_mrz_region, preprocess_mrz_crop
-            max_fallbacks = getattr(settings, "MAX_MRZ_FALLBACK_ATTEMPTS", 3)
+            max_fallbacks = getattr(settings, "MAX_MRZ_FALLBACK_ATTEMPTS", 2)
             fallback_attempts = 0
             for ratio in [0.30, 0.40]:
                 if fallback_attempts >= max_fallbacks or (mrz_result.detected and mrz_result.overall_valid):
@@ -140,8 +152,11 @@ async def extract_document_info(
                         if fallback_attempts >= max_fallbacks:
                             break
                         fallback_attempts += 1
+                        t_fb_start = time.perf_counter()
                         try:
                             mrz_ocr_res = ocr_srv.extract_mrz(v_img, psm=6)
+                            t_fb = (time.perf_counter() - t_fb_start) * 1000.0
+                            logger.info(f"[TIMING] fallback OCR attempt #{fallback_attempts} completed in {t_fb:.2f}ms")
                             if mrz_ocr_res.raw_text.strip():
                                 mrz_candidate_sources.append((f"fallback_{ratio}_{v_name}_psm6", mrz_ocr_res.raw_text))
                                 mrz_result, mrz_fields, mrz_debug_info = MRZService.extract_and_validate_mrz(
@@ -152,10 +167,13 @@ async def extract_document_info(
                                 )
                                 if mrz_result.detected and mrz_result.overall_valid:
                                     break
+                        except TimeoutError as te:
+                            logger.warning(f"Fallback OCR pass timed out: {te}")
                         except Exception:
                             pass
                 except Exception:
                     pass
+
 
 
 

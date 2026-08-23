@@ -1,6 +1,7 @@
 """Unified screening service coordinating OCR, tampering forensics, and biometric face verification."""
 
 import logging
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
@@ -53,6 +54,7 @@ class ScreeningService:
         # -------------------------------------------------------------
         # 1. Decode & Preprocess Document Image (Reused across stages)
         # -------------------------------------------------------------
+        t_pre_start = time.perf_counter()
         try:
             original_doc_img, ocr_optimized_img, processing_meta = ImageService.process_document_image(document_bytes)
         except Exception as img_err:
@@ -61,6 +63,9 @@ class ScreeningService:
 
         if original_doc_img is None or original_doc_img.size == 0:
             raise ValueError("Decoded document image is empty or invalid.")
+
+        t_preprocess = (time.perf_counter() - t_pre_start) * 1000.0
+        logger.info(f"[TIMING] preprocess completed in {t_preprocess:.2f}ms")
 
         # -------------------------------------------------------------
         # 2. Staged OCR & MRZ Document Extraction Pipeline (Sequential)
@@ -75,7 +80,11 @@ class ScreeningService:
         if run_ocr:
             try:
                 # Stage 1: Primary full-document OCR
+                t_prim_start = time.perf_counter()
                 ocr_result = self.ocr_service.extract(ocr_optimized_img)
+                t_prim = (time.perf_counter() - t_prim_start) * 1000.0
+                logger.info(f"[TIMING] primary OCR completed in {t_prim:.2f}ms (conf: {ocr_result.average_confidence:.3f})")
+
                 region_texts = [r.text for r in ocr_result.regions]
 
                 # Initial MRZ evaluation on primary OCR text
@@ -90,6 +99,7 @@ class ScreeningService:
 
                 # Stage 2: Single targeted MRZ crop only if MRZ not detected or invalid
                 if not (mrz_result.detected and mrz_result.overall_valid):
+                    t_mrz_start = time.perf_counter()
                     try:
                         target_crop = extract_mrz_region(ocr_optimized_img, bottom_ratio=0.35)
                         prep_variants = preprocess_mrz_crop(target_crop, scale_factor=settings.MRZ_UPSCALE_FACTOR)
@@ -97,6 +107,8 @@ class ScreeningService:
                             clahe_name, clahe_img = prep_variants[0]
                             try:
                                 mrz_ocr_res = self.ocr_service.extract_mrz(clahe_img, psm=6)
+                                t_mrz = (time.perf_counter() - t_mrz_start) * 1000.0
+                                logger.info(f"[TIMING] MRZ OCR completed in {t_mrz:.2f}ms")
                                 if mrz_ocr_res.raw_text.strip():
                                     mrz_candidate_sources.append((f"crop_0.35_{clahe_name}_psm6", mrz_ocr_res.raw_text))
                                     mrz_result, mrz_fields, _ = self.mrz_service.extract_and_validate_mrz(
@@ -105,6 +117,9 @@ class ScreeningService:
                                         mrz_candidate_texts=mrz_candidate_sources,
                                         include_debug=False
                                     )
+                            except TimeoutError as te:
+                                logger.warning(f"MRZ OCR pass timed out: {te}")
+                                all_warnings.append(f"MRZ OCR timed out: {str(te)}")
                             except Exception as e:
                                 logger.warning(f"Targeted MRZ crop OCR failed: {e}")
                     except Exception as crop_err:
@@ -112,7 +127,7 @@ class ScreeningService:
 
                 # Stage 3: Limited fallback variants only if MRZ is STILL not valid
                 if not (mrz_result.detected and mrz_result.overall_valid):
-                    max_fallbacks = getattr(settings, "MAX_MRZ_FALLBACK_ATTEMPTS", 3)
+                    max_fallbacks = getattr(settings, "MAX_MRZ_FALLBACK_ATTEMPTS", 2)
                     fallback_attempts = 0
                     for ratio in [0.30, 0.40]:
                         if fallback_attempts >= max_fallbacks or (mrz_result.detected and mrz_result.overall_valid):
@@ -124,8 +139,11 @@ class ScreeningService:
                                 if fallback_attempts >= max_fallbacks:
                                     break
                                 fallback_attempts += 1
+                                t_fb_start = time.perf_counter()
                                 try:
                                     mrz_ocr_res = self.ocr_service.extract_mrz(v_img, psm=6)
+                                    t_fb = (time.perf_counter() - t_fb_start) * 1000.0
+                                    logger.info(f"[TIMING] fallback OCR attempt #{fallback_attempts} completed in {t_fb:.2f}ms")
                                     if mrz_ocr_res.raw_text.strip():
                                         mrz_candidate_sources.append((f"fallback_{ratio}_{v_name}_psm6", mrz_ocr_res.raw_text))
                                         mrz_result, mrz_fields, _ = self.mrz_service.extract_and_validate_mrz(
@@ -136,11 +154,13 @@ class ScreeningService:
                                         )
                                         if mrz_result.detected and mrz_result.overall_valid:
                                             break
+                                except TimeoutError as te:
+                                    logger.warning(f"Fallback OCR pass timed out: {te}")
+                                    all_warnings.append(f"Fallback OCR pass timed out: {str(te)}")
                                 except Exception:
                                     pass
                         except Exception:
                             pass
-
 
                 all_regions = list(ocr_result.regions)
                 if mrz_result.detected and mrz_result.line1 and mrz_result.line2:
@@ -190,14 +210,73 @@ class ScreeningService:
 
                 # Release intermediate OCR image array before downstream stages
                 del ocr_optimized_img
+            except TimeoutError as te:
+                logger.warning(f"OCR module timeout during screening: {te}")
+                all_warnings.append(f"OCR timed out: {str(te)}")
+                ocr_data = {
+                    "success": False,
+                    "document_type": doc_type_clean,
+                    "average_confidence": 0.0,
+                    "extracted_text": "",
+                    "fields": {},
+                    "mrz": {
+                        "detected": False,
+                        "format": None,
+                        "line1": None,
+                        "line2": None,
+                        "line3": None,
+                        "raw_line1": None,
+                        "raw_line2": None,
+                        "raw_line3": None,
+                        "valid_format": False,
+                        "check_digits": None,
+                        "field_validation": None,
+                        "overall_valid": False,
+                        "document_code": None,
+                        "issuing_state": None,
+                        "corrections": [],
+                        "validation_disclaimer": "MRZ check-digit validation verifies mathematical data consistency only and does not prove document authenticity."
+                    },
+                    "field_validation": {},
+                    "ocr_regions": [],
+                    "processing": processing_meta.model_dump() if hasattr(processing_meta, 'model_dump') else {},
+                    "language_mode": settings.DEFAULT_LANGUAGE_MODE,
+                    "warnings": [f"OCR execution timed out: {str(te)}"],
+                    "error": str(te)
+                }
             except Exception as ocr_err:
                 logger.error(f"OCR extraction failed during screening: {ocr_err}")
                 all_warnings.append(f"OCR extraction error: {str(ocr_err)}")
                 ocr_data = {
                     "success": False,
-                    "error": str(ocr_err),
+                    "document_type": doc_type_clean,
+                    "average_confidence": 0.0,
+                    "extracted_text": "",
                     "fields": {},
-                    "warnings": [f"OCR extraction error: {str(ocr_err)}"]
+                    "mrz": {
+                        "detected": False,
+                        "format": None,
+                        "line1": None,
+                        "line2": None,
+                        "line3": None,
+                        "raw_line1": None,
+                        "raw_line2": None,
+                        "raw_line3": None,
+                        "valid_format": False,
+                        "check_digits": None,
+                        "field_validation": None,
+                        "overall_valid": False,
+                        "document_code": None,
+                        "issuing_state": None,
+                        "corrections": [],
+                        "validation_disclaimer": "MRZ check-digit validation verifies mathematical data consistency only and does not prove document authenticity."
+                    },
+                    "field_validation": {},
+                    "ocr_regions": [],
+                    "processing": processing_meta.model_dump() if hasattr(processing_meta, 'model_dump') else {},
+                    "language_mode": settings.DEFAULT_LANGUAGE_MODE,
+                    "warnings": [f"OCR extraction error: {str(ocr_err)}"],
+                    "error": str(ocr_err)
                 }
         else:
             ocr_data = {
@@ -206,7 +285,7 @@ class ScreeningService:
                 "average_confidence": 0.0,
                 "extracted_text": "",
                 "fields": {},
-                "mrz": {"detected": False, "is_valid": False, "check_digits": {}},
+                "mrz": {"detected": False, "valid_format": False, "overall_valid": False, "check_digits": None},
                 "warnings": ["OCR extraction skipped as requested."]
             }
 
