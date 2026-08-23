@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Pytest and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data, evaluation datasets, and test scratch files
+evaluation/
+scratch/
+tests/data/
+
+# Model weights (downloaded via scripts/download_face_models.py during Docker build)
+app/models/weights/*.onnx
+
+# Environment variables & secrets
+.env
+.env.*
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

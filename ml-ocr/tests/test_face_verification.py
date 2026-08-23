@@ -434,6 +434,27 @@ class TestFaceVerificationAPI:
         assert report["sample_counts"]["genuine_pairs"] == 2
         assert report["sample_counts"]["impostor_pairs"] == 2
 
+    def test_download_face_models_script(self, tmp_path):
+        """Deployment model download script creates directory and skips existing models properly."""
+        from scripts.download_face_models import download_model, MODEL_DEFINITIONS
+        target_dir = tmp_path / "models"
+        target_dir.mkdir()
+
+        # Test with dummy model file
+        dummy_config = {
+            "filename": "test_model.onnx",
+            "url": "http://invalid-url-should-skip.local",
+            "min_size_bytes": 10,
+            "description": "Test Model"
+        }
+        test_file = target_dir / "test_model.onnx"
+        test_file.write_bytes(b"0123456789ABCDEF")
+
+        # When file exists with >= min_size, download_model should return True without contacting network
+        success = download_model("test", dummy_config, target_dir)
+        assert success is True
+
+
 
 class TestSimilarityBands:
     """Explicit tests for similarity bands, UI colors, and boundary conditions."""
