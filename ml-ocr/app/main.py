@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, ocr, tampering
+from app.api.routes import health, ocr, tampering, face_verification
 from app.config import settings
 from app.utils.logger import get_logger
 
@@ -25,9 +25,9 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description=(
-        "Production-ready OCR extraction and document verification microservice for the "
-        "AI-Based Fake Identity & Document Screening System (SIH Project). "
-        "Supports Passports (ICAO 9303 TD3 MRZ check-digit validation), Visas, and National IDs."
+        "Production-ready OCR extraction, document verification, tampering forensics, "
+        "and biometric face verification microservice for the "
+        "AI-Based Fake Identity & Document Screening System (SIH Project)."
     ),
     docs_url="/docs",
     redoc_url="/redoc",
@@ -63,6 +63,9 @@ app.include_router(health.router, prefix=settings.API_V1_PREFIX)
 app.include_router(ocr.router, prefix=settings.API_V1_PREFIX)
 app.include_router(tampering.router, prefix=settings.API_V1_PREFIX)
 app.include_router(tampering.router, prefix="")
+app.include_router(face_verification.router, prefix=settings.API_V1_PREFIX)
+app.include_router(face_verification.router, prefix="")
+
 
 
 
