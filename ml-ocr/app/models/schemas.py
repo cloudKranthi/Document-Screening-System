@@ -224,3 +224,14 @@ class FaceVerificationResult(BaseModel):
     disclaimer: str = "Face similarity is a biometric comparison signal and does not by itself prove identity or document authenticity."
 
 
+class UnifiedScreeningResult(BaseModel):
+    """Unified document screening response combining OCR extraction, tampering forensics, and biometric face verification."""
+    success: bool = Field(default=True, description="Indicates if overall screening completed")
+    document_type: str = Field(..., description="Detected or specified document type (passport, visa, national_id)")
+    ocr: Dict[str, Any] = Field(default_factory=dict, description="OCR extraction results, fields, confidences, and MRZ validation")
+    tampering: Optional[Dict[str, Any]] = Field(default=None, description="Document tampering and forensic anomaly analysis")
+    face_verification: Optional[Dict[str, Any]] = Field(default=None, description="Biometric face verification results between document portrait and selfie")
+    warnings: List[str] = Field(default_factory=list, description="Aggregated processing and verification warnings")
+
+
+

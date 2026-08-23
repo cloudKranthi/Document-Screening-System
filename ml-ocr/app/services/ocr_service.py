@@ -69,13 +69,15 @@ class TesseractOCREngine(BaseOCREngine):
         return "tesseract"
 
     def extract_text(self, image: np.ndarray) -> OCRResult:
+        timeout_sec = getattr(settings, "TESSERACT_TIMEOUT_SECONDS", 30)
         try:
             # Use PSM 3 for general document layout
             custom_config = r'--oem 3 --psm 3'
             data = self.pytesseract.image_to_data(
                 image,
                 config=custom_config,
-                output_type=self.pytesseract.Output.DICT
+                output_type=self.pytesseract.Output.DICT,
+                timeout=timeout_sec
             )
             
             regions: List[OCRRegion] = []
@@ -103,19 +105,30 @@ class TesseractOCREngine(BaseOCREngine):
                 regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
                 extracted_words.append(text)
                 
-            raw_text = self.pytesseract.image_to_string(image, config=custom_config).strip()
+            raw_text = self.pytesseract.image_to_string(
+                image,
+                config=custom_config,
+                timeout=timeout_sec
+            ).strip()
             if not raw_text and extracted_words:
                 raw_text = " ".join(extracted_words)
                 
             avg_conf = ConfidenceService.calculate_average_confidence(regions)
             return OCRResult(raw_text=raw_text, regions=regions, average_confidence=avg_conf)
             
+        except (self.pytesseract.TesseractTimeoutError, TimeoutError) as te:
+            logger.warning(f"Tesseract OCR timed out after {timeout_sec}s: {te}")
+            raise TimeoutError(f"Tesseract process timeout ({timeout_sec}s)")
         except Exception as e:
+            if "timeout" in str(e).lower():
+                logger.warning(f"Tesseract OCR timed out after {timeout_sec}s: {e}")
+                raise TimeoutError(f"Tesseract process timeout ({timeout_sec}s)")
             logger.error(f"Tesseract OCR extraction failed: {str(e)}")
             raise RuntimeError(f"Tesseract execution error: {str(e)}")
 
     def extract_mrz_text(self, image: np.ndarray, psm: int = 6) -> OCRResult:
         """Dedicated MRZ OCR extraction with configurable PSM, strict ICAO whitelist, and dictionary lookup disabled."""
+        timeout_sec = getattr(settings, "TESSERACT_TIMEOUT_SECONDS", 30)
         try:
             # Disables dictionary word lookup to prevent Tesseract from turning '<<<<' into words like 'EERE' or 'KERR'.
             mrz_config = (
@@ -130,7 +143,8 @@ class TesseractOCREngine(BaseOCREngine):
             data = self.pytesseract.image_to_data(
                 image,
                 config=mrz_config,
-                output_type=self.pytesseract.Output.DICT
+                output_type=self.pytesseract.Output.DICT,
+                timeout=timeout_sec
             )
             
             regions: List[OCRRegion] = []
@@ -157,19 +171,30 @@ class TesseractOCREngine(BaseOCREngine):
                 regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
                 extracted_words.append(text)
                 
-            raw_text = self.pytesseract.image_to_string(image, config=mrz_config).strip()
+            raw_text = self.pytesseract.image_to_string(
+                image,
+                config=mrz_config,
+                timeout=timeout_sec
+            ).strip()
             if not raw_text and extracted_words:
                 raw_text = "\n".join(extracted_words)
                 
             avg_conf = ConfidenceService.calculate_average_confidence(regions)
             return OCRResult(raw_text=raw_text, regions=regions, average_confidence=avg_conf)
             
+        except (self.pytesseract.TesseractTimeoutError, TimeoutError) as te:
+            logger.warning(f"Tesseract MRZ OCR timed out after {timeout_sec}s: {te}")
+            raise TimeoutError(f"Tesseract MRZ process timeout ({timeout_sec}s)")
         except Exception as e:
+            if "timeout" in str(e).lower():
+                logger.warning(f"Tesseract MRZ OCR timed out after {timeout_sec}s: {e}")
+                raise TimeoutError(f"Tesseract MRZ process timeout ({timeout_sec}s)")
             logger.error(f"Tesseract MRZ OCR extraction (PSM {psm}) failed: {str(e)}")
             raise RuntimeError(f"Tesseract MRZ execution error: {str(e)}")
 
     def extract_field_text(self, image: np.ndarray, field_type: str, psm: int = 7) -> OCRResult:
         """Targeted field OCR extraction for small crops (DOB, Gender) with whitelist and custom PSM."""
+        timeout_sec = getattr(settings, "TESSERACT_TIMEOUT_SECONDS", 30)
         try:
             if field_type.lower() == "dob":
                 whitelist = "0123456789/-. "
@@ -190,7 +215,8 @@ class TesseractOCREngine(BaseOCREngine):
             data = self.pytesseract.image_to_data(
                 image,
                 config=field_config,
-                output_type=self.pytesseract.Output.DICT
+                output_type=self.pytesseract.Output.DICT,
+                timeout=timeout_sec
             )
             regions: List[OCRRegion] = []
             extracted_words = []
@@ -210,15 +236,27 @@ class TesseractOCREngine(BaseOCREngine):
                 regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
                 extracted_words.append(text)
 
-            raw_text = self.pytesseract.image_to_string(image, config=field_config).strip()
+            raw_text = self.pytesseract.image_to_string(
+                image,
+                config=field_config,
+                timeout=timeout_sec
+            ).strip()
             if not raw_text and extracted_words:
                 raw_text = " ".join(extracted_words)
 
             avg_conf = ConfidenceService.calculate_average_confidence(regions)
             return OCRResult(raw_text=raw_text, regions=regions, average_confidence=avg_conf)
+
+        except (self.pytesseract.TesseractTimeoutError, TimeoutError) as te:
+            logger.warning(f"Tesseract field OCR timed out after {timeout_sec}s ({field_type}): {te}")
+            raise TimeoutError(f"Tesseract field process timeout ({timeout_sec}s)")
         except Exception as e:
+            if "timeout" in str(e).lower():
+                logger.warning(f"Tesseract field OCR timed out after {timeout_sec}s ({field_type}): {e}")
+                raise TimeoutError(f"Tesseract field process timeout ({timeout_sec}s)")
             logger.error(f"Tesseract field OCR extraction failed ({field_type}, PSM {psm}): {str(e)}")
             raise RuntimeError(f"Tesseract field execution error: {str(e)}")
+
 
 
 class PaddleOCREngine(BaseOCREngine):

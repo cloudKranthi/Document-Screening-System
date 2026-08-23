@@ -40,15 +40,19 @@ async def analyze_document_tampering_endpoint(
     # 1. Safely read and validate upload bytes in memory
     raw_bytes = await ImageService.validate_and_read_upload(file)
     
-    # 2. Decode image safely
-    original_img, _, _ = ImageService.process_document_image(raw_bytes)
+    def _sync_tamper():
+        # 2. Decode image safely
+        original_img, _, _ = ImageService.process_document_image(raw_bytes)
 
-    # 3. Execute tampering evaluation
-    result = tampering_srv.analyze_document(
-        image_bytes=raw_bytes,
-        document_image=original_img
-    )
-    return result
+        # 3. Execute tampering evaluation
+        return tampering_srv.analyze_document(
+            image_bytes=raw_bytes,
+            document_image=original_img
+        )
+
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_sync_tamper)
+
 
 
 @router.post(

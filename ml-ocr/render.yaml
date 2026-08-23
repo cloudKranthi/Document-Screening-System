@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: document-screening-ml-ocr
+    runtime: docker
+    rootDir: ml-ocr
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /health
+
+    envVars:
+      - key: APP_ENV
+        value: production
+
+      - key: OCR_ENGINE
+        value: tesseract
+
+      - key: FACE_MATCH_THRESHOLD
+        value: "0.75"
+
+      - key: FACE_MODEL_DIR
+        value: app/models/weights
+
+      - key: MASK_PII_LOGS
+        value: "true"

@@ -104,26 +104,26 @@ def detect_document_contour(image: np.ndarray, min_area_ratio: float = 0.15) -> 
     return None
 
 
-def resize_image_if_needed(image: np.ndarray, max_dim: int = 2400, min_dim: int = 400) -> Tuple[np.ndarray, float]:
-    """Resizes image if too large or too small, preserving aspect ratio."""
+def resize_image_if_needed(image: np.ndarray, max_dim: int = 1400, min_dim: int = 0) -> Tuple[np.ndarray, float]:
+    """Downscales image if dimensions exceed max_dim (preserving aspect ratio). Does NOT upscale small images."""
     h, w = image.shape[:2]
     scale = 1.0
     
     max_current = max(h, w)
-    min_current = min(h, w)
     
     if max_current > max_dim:
         scale = max_dim / float(max_current)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
         image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    elif min_current < min_dim and min_current > 0:
-        scale = min_dim / float(min_current)
+    elif min_dim > 0 and min(h, w) < min_dim and min(h, w) > 0:
+        scale = min_dim / float(min(h, w))
         new_w = int(w * scale)
         new_h = int(h * scale)
         image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
         
     return image, scale
+
 
 
 def enhance_for_ocr(image: np.ndarray, clip_limit: float = 2.5, tile_grid_size: int = 8) -> np.ndarray:

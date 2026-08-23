@@ -27,18 +27,23 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: List[str] = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"]
     
     # Image preprocessing settings
-    MAX_IMAGE_DIMENSION: int = 2400
-    MIN_IMAGE_DIMENSION: int = 300
+    MAX_IMAGE_DIMENSION: int = 1400
+    OCR_MAX_IMAGE_DIM: int = 1400
+    MIN_IMAGE_DIMENSION: int = 0  # Do not upscale small images
     CLAHE_CLIP_LIMIT: float = 2.5
     CLAHE_TILE_GRID_SIZE: int = 8
     
     # OCR Engine settings
     OCR_ENGINE: str = os.getenv("OCR_ENGINE", "auto")  # "paddleocr", "tesseract", "auto", "mock"
     TESSERACT_CMD: str = os.getenv("TESSERACT_CMD", "")
+    TESSERACT_TIMEOUT_SECONDS: int = int(os.getenv("TESSERACT_TIMEOUT_SECONDS", "30"))
     
     # MRZ Processing settings
     MRZ_CROP_RATIOS: List[float] = [0.20, 0.25, 0.30, 0.35, 0.40]
     MRZ_UPSCALE_FACTOR: float = 3.0
+    MAX_MRZ_FALLBACK_ATTEMPTS: int = int(os.getenv("MAX_MRZ_FALLBACK_ATTEMPTS", "2"))
+
+
     
     # National ID / Visual OCR settings
     NATIONAL_ID_CONFIDENCE_THRESHOLD: float = 0.50
