@@ -5,9 +5,10 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, ocr, tampering, face_verification
+from app.api.routes import health, ocr, tampering, face_verification, screening
 from app.config import settings
 from app.utils.logger import get_logger
+
 
 logger = get_logger("app.main")
 
@@ -65,6 +66,9 @@ app.include_router(tampering.router, prefix=settings.API_V1_PREFIX)
 app.include_router(tampering.router, prefix="")
 app.include_router(face_verification.router, prefix=settings.API_V1_PREFIX)
 app.include_router(face_verification.router, prefix="")
+app.include_router(screening.router, prefix=settings.API_V1_PREFIX)
+app.include_router(screening.router, prefix="")
+
 
 
 
