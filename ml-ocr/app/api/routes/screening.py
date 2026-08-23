@@ -62,12 +62,25 @@ async def screen_document(
         default="auto",
         description="Target document type: 'passport', 'visa', 'national_id', or 'auto' for automatic detection."
     ),
+    run_ocr: bool = Form(
+        default=True,
+        description="Whether to execute OCR and document field extraction."
+    ),
+    detect_tampering: bool = Form(
+        default=False,
+        description="Whether to execute multi-signal tampering forensics."
+    ),
+    verify_face: bool = Form(
+        default=False,
+        description="Whether to execute biometric face verification against selfie."
+    ),
     screening_service: ScreeningService = Depends(get_screening_service),
 ) -> UnifiedScreeningResult:
     """Processes uploaded document and optional selfie via the unified ScreeningService."""
     logger.info(
         f"Received unified screening request for document: {document_image.filename}, "
-        f"selfie: {getattr(selfie_image, 'filename', None)}, document_type: {document_type}"
+        f"selfie: {getattr(selfie_image, 'filename', None)}, document_type: {document_type}, "
+        f"run_ocr: {run_ocr}, detect_tampering: {detect_tampering}, verify_face: {verify_face}"
     )
 
     # 1. Validate requested document_type parameter
@@ -105,7 +118,10 @@ async def screen_document(
             screening_service.screen,
             document_bytes=raw_doc_bytes,
             selfie_bytes=selfie_bytes,
-            document_type=document_type
+            document_type=document_type,
+            run_ocr=run_ocr,
+            detect_tampering=detect_tampering,
+            verify_face=verify_face
         )
         return result
     except ValueError as ve:
@@ -113,6 +129,7 @@ async def screen_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve)
         )
+
 
     except Exception as exc:
         logger.error(f"Screening pipeline execution error: {exc}")

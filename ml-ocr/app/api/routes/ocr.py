@@ -88,43 +88,76 @@ async def extract_document_info(
             logger.error(f"General OCR execution failed: {str(e)}")
             raise e
 
-        mrz_candidate_sources: list[tuple[str, str]] = []
-        mrz_regions_combined = []
-        
-        try:
-            crop_variants = ImageService.get_all_mrz_crop_variants(
-                ocr_optimized_img,
-                ratios=settings.MRZ_CROP_RATIOS,
-                scale_factor=settings.MRZ_UPSCALE_FACTOR
-            )
-            
-            # Test configurations: PSM 6 (uniform block), PSM 4 (single column), PSM 11 (sparse text)
-            psm_modes = [6, 4, 11]
-            
-            for var_name, ratio, var_img in crop_variants:
-                for psm in psm_modes:
-                    src_label = f"{var_name}_psm{psm}"
-                    try:
-                        mrz_ocr_res = ocr_srv.extract_mrz(var_img, psm=psm)
-                        if mrz_ocr_res.raw_text.strip():
-                            mrz_candidate_sources.append((src_label, mrz_ocr_res.raw_text))
-                            if mrz_ocr_res.regions:
-                                mrz_regions_combined.extend(mrz_ocr_res.regions)
-                    except Exception as mrz_err:
-                        logger.warning(f"MRZ OCR pass ({src_label}) failed: {str(mrz_err)}")
-        except Exception as e:
-            logger.warning(f"MRZ crop candidate generation failed: {str(e)}")
-
-        # Step 15: Passport MRZ Candidate Scoring, Detection & ICAO 9303 Check Digit Validation
         region_texts = [r.text for r in ocr_result.regions]
         should_debug = include_debug or settings.DEBUG
-        
+
+        # Step 14: Staged MRZ Candidate Generation & ICAO 9303 Check Digit Validation
+        # Stage 1: Initial evaluation on full-document OCR
         mrz_result, mrz_fields, mrz_debug_info = MRZService.extract_and_validate_mrz(
             raw_ocr_text=ocr_result.raw_text,
             ocr_lines=region_texts,
-            mrz_candidate_texts=mrz_candidate_sources,
+            mrz_candidate_texts=[],
             include_debug=should_debug
         )
+
+        mrz_candidate_sources: list[tuple[str, str]] = []
+
+        # Stage 2: Single targeted MRZ crop only if MRZ not detected or invalid
+        if not (mrz_result.detected and mrz_result.overall_valid):
+            try:
+                from app.utils.image_utils import extract_mrz_region, preprocess_mrz_crop
+                target_crop = extract_mrz_region(ocr_optimized_img, bottom_ratio=0.35)
+                prep_variants = preprocess_mrz_crop(target_crop, scale_factor=settings.MRZ_UPSCALE_FACTOR)
+                if prep_variants:
+                    clahe_name, clahe_img = prep_variants[0]
+                    try:
+                        mrz_ocr_res = ocr_srv.extract_mrz(clahe_img, psm=6)
+                        if mrz_ocr_res.raw_text.strip():
+                            mrz_candidate_sources.append((f"crop_0.35_{clahe_name}_psm6", mrz_ocr_res.raw_text))
+                            mrz_result, mrz_fields, mrz_debug_info = MRZService.extract_and_validate_mrz(
+                                raw_ocr_text=ocr_result.raw_text,
+                                ocr_lines=region_texts,
+                                mrz_candidate_texts=mrz_candidate_sources,
+                                include_debug=should_debug
+                            )
+                    except Exception as e:
+                        logger.warning(f"Targeted MRZ crop OCR failed: {e}")
+            except Exception as crop_err:
+                logger.warning(f"Targeted MRZ crop generation error: {crop_err}")
+
+        # Stage 3: Limited fallback variants only if MRZ is STILL not valid
+        if not (mrz_result.detected and mrz_result.overall_valid):
+            from app.utils.image_utils import extract_mrz_region, preprocess_mrz_crop
+            max_fallbacks = getattr(settings, "MAX_MRZ_FALLBACK_ATTEMPTS", 3)
+            fallback_attempts = 0
+            for ratio in [0.30, 0.40]:
+                if fallback_attempts >= max_fallbacks or (mrz_result.detected and mrz_result.overall_valid):
+                    break
+                try:
+                    crop = extract_mrz_region(ocr_optimized_img, bottom_ratio=ratio)
+                    variants = preprocess_mrz_crop(crop, scale_factor=settings.MRZ_UPSCALE_FACTOR)
+                    for v_name, v_img in variants[1:]:  # Otsu, adaptive
+                        if fallback_attempts >= max_fallbacks:
+                            break
+                        fallback_attempts += 1
+                        try:
+                            mrz_ocr_res = ocr_srv.extract_mrz(v_img, psm=6)
+                            if mrz_ocr_res.raw_text.strip():
+                                mrz_candidate_sources.append((f"fallback_{ratio}_{v_name}_psm6", mrz_ocr_res.raw_text))
+                                mrz_result, mrz_fields, mrz_debug_info = MRZService.extract_and_validate_mrz(
+                                    raw_ocr_text=ocr_result.raw_text,
+                                    ocr_lines=region_texts,
+                                    mrz_candidate_texts=mrz_candidate_sources,
+                                    include_debug=should_debug
+                                )
+                                if mrz_result.detected and mrz_result.overall_valid:
+                                    break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+
 
         # Step 16: Merge OCR outputs & regions (Preserving both general and MRZ outputs)
         all_regions = list(ocr_result.regions)

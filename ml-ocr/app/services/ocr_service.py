@@ -72,10 +72,12 @@ class TesseractOCREngine(BaseOCREngine):
         try:
             # Use PSM 3 for general document layout
             custom_config = r'--oem 3 --psm 3'
+            timeout_sec = getattr(settings, "TESSERACT_TIMEOUT_SECONDS", 5)
             data = self.pytesseract.image_to_data(
                 image,
                 config=custom_config,
-                output_type=self.pytesseract.Output.DICT
+                output_type=self.pytesseract.Output.DICT,
+                timeout=timeout_sec
             )
             
             regions: List[OCRRegion] = []
@@ -103,7 +105,11 @@ class TesseractOCREngine(BaseOCREngine):
                 regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
                 extracted_words.append(text)
                 
-            raw_text = self.pytesseract.image_to_string(image, config=custom_config).strip()
+            raw_text = self.pytesseract.image_to_string(
+                image,
+                config=custom_config,
+                timeout=timeout_sec
+            ).strip()
             if not raw_text and extracted_words:
                 raw_text = " ".join(extracted_words)
                 
@@ -127,10 +133,12 @@ class TesseractOCREngine(BaseOCREngine):
                 '-c load_number_dawg=0 '
                 '-c load_bigram_dawg=0'
             )
+            timeout_sec = getattr(settings, "TESSERACT_TIMEOUT_SECONDS", 5)
             data = self.pytesseract.image_to_data(
                 image,
                 config=mrz_config,
-                output_type=self.pytesseract.Output.DICT
+                output_type=self.pytesseract.Output.DICT,
+                timeout=timeout_sec
             )
             
             regions: List[OCRRegion] = []
@@ -157,7 +165,11 @@ class TesseractOCREngine(BaseOCREngine):
                 regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
                 extracted_words.append(text)
                 
-            raw_text = self.pytesseract.image_to_string(image, config=mrz_config).strip()
+            raw_text = self.pytesseract.image_to_string(
+                image,
+                config=mrz_config,
+                timeout=timeout_sec
+            ).strip()
             if not raw_text and extracted_words:
                 raw_text = "\n".join(extracted_words)
                 
@@ -187,10 +199,12 @@ class TesseractOCREngine(BaseOCREngine):
                 '-c load_number_dawg=0 '
                 '-c load_bigram_dawg=0'
             )
+            timeout_sec = getattr(settings, "TESSERACT_TIMEOUT_SECONDS", 5)
             data = self.pytesseract.image_to_data(
                 image,
                 config=field_config,
-                output_type=self.pytesseract.Output.DICT
+                output_type=self.pytesseract.Output.DICT,
+                timeout=timeout_sec
             )
             regions: List[OCRRegion] = []
             extracted_words = []
@@ -210,12 +224,17 @@ class TesseractOCREngine(BaseOCREngine):
                 regions.append(OCRRegion(text=text, confidence=norm_conf, bbox=bbox))
                 extracted_words.append(text)
 
-            raw_text = self.pytesseract.image_to_string(image, config=field_config).strip()
+            raw_text = self.pytesseract.image_to_string(
+                image,
+                config=field_config,
+                timeout=timeout_sec
+            ).strip()
             if not raw_text and extracted_words:
                 raw_text = " ".join(extracted_words)
 
             avg_conf = ConfidenceService.calculate_average_confidence(regions)
             return OCRResult(raw_text=raw_text, regions=regions, average_confidence=avg_conf)
+
         except Exception as e:
             logger.error(f"Tesseract field OCR extraction failed ({field_type}, PSM {psm}): {str(e)}")
             raise RuntimeError(f"Tesseract field execution error: {str(e)}")

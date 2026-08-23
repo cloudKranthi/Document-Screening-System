@@ -8,12 +8,14 @@ from fastapi.testclient import TestClient
 
 from app.api.routes.face_verification import get_face_verification_service
 from app.api.routes.ocr import get_ocr_service, get_tampering_service
+from app.config import settings
 from app.main import app
 from app.models.schemas import FaceVerificationResult, OCRRegion, TamperingResult, UnifiedScreeningResult
 from app.services.face_embedding_service import FaceEmbeddingService, MockFaceEmbeddingEngine
 from app.services.face_verification_service import FaceVerificationService
 from app.services.ocr_service import MockOCREngine, OCRResult, OCRService
 from app.services.tampering_service import TamperingService
+from app.utils.image_utils import resize_image_if_needed
 
 
 def _draw_synthetic_document_image(text: str = "PASSPORT", size: int = 400) -> bytes:
@@ -64,7 +66,7 @@ def _draw_synthetic_selfie_image(size: int = 300, add_blur: bool = False) -> byt
 
 
 class TestUnifiedScreeningEndpoint:
-    """Comprehensive test suite for POST /api/v1/screen covering all 12 specified scenarios."""
+    """Comprehensive test suite for POST /api/v1/screen covering all specified scenarios."""
 
     @pytest.fixture
     def client(self):
@@ -160,14 +162,19 @@ class TestUnifiedScreeningEndpoint:
         yield custom_face_service
         app.dependency_overrides.pop(get_face_verification_service, None)
 
-    def test_screen_passport_with_selfie_success(self, client, mock_passport_ocr, mock_matching_face_service):
-        """Scenario 1: Passport + matching selfie processes OCR, tampering, and biometrics successfully."""
+    def test_screen_passport_with_selfie_full_screening(self, client, mock_passport_ocr, mock_matching_face_service):
+        """Scenario 1: Passport + selfie with detect_tampering=True and verify_face=True runs full pipeline."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
         selfie_bytes = _draw_synthetic_selfie_image()
 
         response = client.post(
             "/api/v1/screen",
-            data={"document_type": "passport"},
+            data={
+                "document_type": "passport",
+                "run_ocr": "true",
+                "detect_tampering": "true",
+                "verify_face": "true"
+            },
             files={
                 "document_image": ("passport.jpg", doc_bytes, "image/jpeg"),
                 "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
@@ -190,53 +197,8 @@ class TestUnifiedScreeningEndpoint:
         assert data["face_verification"]["match_band"] in ["STRONG_MATCH", "BORDERLINE_MATCH"]
         assert data["face_verification"]["ui_color"] in ["GREEN", "YELLOW"]
 
-    def test_screen_visa_with_selfie_success(self, client, mock_visa_ocr, mock_matching_face_service):
-        """Scenario 2: Visa + selfie processes MRV lines and face verification."""
-        doc_bytes = _draw_synthetic_document_image("VISA")
-        selfie_bytes = _draw_synthetic_selfie_image()
-
-        response = client.post(
-            "/api/v1/screen",
-            data={"document_type": "visa"},
-            files={
-                "document_image": ("visa.jpg", doc_bytes, "image/jpeg"),
-                "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
-            }
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["success"] is True
-        assert data["document_type"] == "visa"
-        assert data["ocr"]["success"] is True
-        assert "tampering" in data
-        assert data["face_verification"]["match"] is True
-
-    def test_screen_national_id_with_selfie_success(self, client, mock_national_id_ocr, mock_matching_face_service):
-        """Scenario 3: National ID + selfie processes TD1 fields and face verification."""
-        doc_bytes = _draw_synthetic_document_image("NATIONAL ID")
-        selfie_bytes = _draw_synthetic_selfie_image()
-
-        response = client.post(
-            "/api/v1/screen",
-            data={"document_type": "national_id"},
-            files={
-                "document_image": ("national_id.jpg", doc_bytes, "image/jpeg"),
-                "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
-            }
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["success"] is True
-        assert data["document_type"] == "national_id"
-        assert data["ocr"]["success"] is True
-        assert data["face_verification"]["match"] is True
-
-    def test_screen_passport_without_selfie(self, client, mock_passport_ocr):
-        """Scenario 4: Passport without selfie returns NOT_EVALUATED and GRAY status."""
+    def test_screen_ocr_only_default_behavior(self, client, mock_passport_ocr):
+        """Scenario 2: Default flags run OCR only, skipping tampering and face verification."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
 
         response = client.post(
@@ -252,17 +214,91 @@ class TestUnifiedScreeningEndpoint:
 
         assert data["success"] is True
         assert data["ocr"]["success"] is True
-        assert "tampering" in data
+        assert data["ocr"]["fields"]["passport_number"] == "L898902C3"
+        assert data["tampering"] is None
+        assert data["face_verification"]["status"] == "NOT_EVALUATED"
 
-        # Biometrics not evaluated when selfie is absent
+    def test_screen_tampering_disabled_explicit(self, client, mock_passport_ocr):
+        """Scenario 3: Explicitly setting detect_tampering=False prevents tampering computation."""
+        doc_bytes = _draw_synthetic_document_image("PASSPORT")
+
+        response = client.post(
+            "/api/v1/screen",
+            data={"document_type": "passport", "detect_tampering": "false"},
+            files={
+                "document_image": ("passport.jpg", doc_bytes, "image/jpeg")
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tampering"] is None
+
+    def test_screen_face_disabled_explicit_even_with_selfie(self, client, mock_passport_ocr):
+        """Scenario 4: Setting verify_face=False skips face verification even when selfie is provided."""
+        doc_bytes = _draw_synthetic_document_image("PASSPORT")
+        selfie_bytes = _draw_synthetic_selfie_image()
+
+        response = client.post(
+            "/api/v1/screen",
+            data={"document_type": "passport", "verify_face": "false"},
+            files={
+                "document_image": ("passport.jpg", doc_bytes, "image/jpeg"),
+                "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
         assert data["face_verification"]["status"] == "NOT_EVALUATED"
         assert data["face_verification"]["match"] is None
-        assert data["face_verification"]["similarity_score"] is None
-        assert data["face_verification"]["match_band"] == "NOT_EVALUATED"
-        assert data["face_verification"]["ui_color"] == "GRAY"
+
+    def test_screen_visa_with_selfie_success(self, client, mock_visa_ocr, mock_matching_face_service):
+        """Scenario 5: Visa + selfie with verify_face=True processes MRV lines and face verification."""
+        doc_bytes = _draw_synthetic_document_image("VISA")
+        selfie_bytes = _draw_synthetic_selfie_image()
+
+        response = client.post(
+            "/api/v1/screen",
+            data={"document_type": "visa", "verify_face": "true"},
+            files={
+                "document_image": ("visa.jpg", doc_bytes, "image/jpeg"),
+                "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["success"] is True
+        assert data["document_type"] == "visa"
+        assert data["ocr"]["success"] is True
+        assert data["face_verification"]["match"] is True
+
+    def test_screen_national_id_with_selfie_success(self, client, mock_national_id_ocr, mock_matching_face_service):
+        """Scenario 6: National ID + selfie with verify_face=True processes TD1 fields and face verification."""
+        doc_bytes = _draw_synthetic_document_image("NATIONAL ID")
+        selfie_bytes = _draw_synthetic_selfie_image()
+
+        response = client.post(
+            "/api/v1/screen",
+            data={"document_type": "national_id", "verify_face": "true"},
+            files={
+                "document_image": ("national_id.jpg", doc_bytes, "image/jpeg"),
+                "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["success"] is True
+        assert data["document_type"] == "national_id"
+        assert data["ocr"]["success"] is True
+        assert data["face_verification"]["match"] is True
 
     def test_screen_document_type_auto_detection(self, client, mock_passport_ocr):
-        """Scenario 5: document_type=auto automatically classifies document as passport."""
+        """Scenario 7: document_type=auto automatically classifies document as passport."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
 
         response = client.post(
@@ -280,12 +316,13 @@ class TestUnifiedScreeningEndpoint:
         assert data["ocr"]["success"] is True
 
     def test_face_verification_no_match(self, client, mock_passport_ocr, mock_different_face_service):
-        """Scenario 6: Different subject selfie returns NO_MATCH, match=False, match_band=NO_MATCH, ui_color=RED."""
+        """Scenario 8: Different subject selfie returns NO_MATCH, match=False, match_band=NO_MATCH, ui_color=RED."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
         selfie_bytes = _draw_synthetic_selfie_image()
 
         response = client.post(
             "/api/v1/screen",
+            data={"verify_face": "true"},
             files={
                 "document_image": ("passport.jpg", doc_bytes, "image/jpeg"),
                 "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
@@ -302,12 +339,13 @@ class TestUnifiedScreeningEndpoint:
         assert data["face_verification"]["ui_color"] == "RED"
 
     def test_face_verification_insufficient_quality(self, client, mock_passport_ocr):
-        """Scenario 7: Blurred selfie yields INSUFFICIENT_QUALITY without failing whole screening request."""
+        """Scenario 9: Blurred selfie yields INSUFFICIENT_QUALITY without failing whole screening request."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
         blurred_selfie = _draw_synthetic_selfie_image(add_blur=True)
 
         response = client.post(
             "/api/v1/screen",
+            data={"verify_face": "true"},
             files={
                 "document_image": ("passport.jpg", doc_bytes, "image/jpeg"),
                 "selfie_image": ("blurred_selfie.jpg", blurred_selfie, "image/jpeg")
@@ -322,11 +360,12 @@ class TestUnifiedScreeningEndpoint:
         assert data["face_verification"]["match"] is None
 
     def test_tampering_low_result_on_clean_document(self, client, mock_passport_ocr):
-        """Scenario 8: Tampering analysis on clean document produces LOW risk level."""
+        """Scenario 10: Tampering analysis on clean document produces LOW risk level when enabled."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
 
         response = client.post(
             "/api/v1/screen",
+            data={"detect_tampering": "true"},
             files={
                 "document_image": ("clean_doc.jpg", doc_bytes, "image/jpeg")
             }
@@ -340,7 +379,7 @@ class TestUnifiedScreeningEndpoint:
         assert data["tampering"]["tampering_risk_score"] < 0.30
 
     def test_tampering_module_failure_tolerance(self, client, mock_passport_ocr):
-        """Scenario 9: If tampering module fails, request succeeds with OCR, warnings, and fallback tampering status."""
+        """Scenario 11: If tampering module fails, request succeeds with OCR, warnings, and fallback tampering status."""
         class CrashingTamperingService(TamperingService):
             def analyze_document(self, *args, **kwargs):
                 raise RuntimeError("Forensic ELA engine out of memory")
@@ -351,6 +390,7 @@ class TestUnifiedScreeningEndpoint:
             doc_bytes = _draw_synthetic_document_image("PASSPORT")
             response = client.post(
                 "/api/v1/screen",
+                data={"detect_tampering": "true"},
                 files={
                     "document_image": ("passport.jpg", doc_bytes, "image/jpeg")
                 }
@@ -366,7 +406,7 @@ class TestUnifiedScreeningEndpoint:
             app.dependency_overrides.pop(get_tampering_service, None)
 
     def test_missing_document_file_returns_422(self, client):
-        """Scenario 10: Missing required document_image field returns HTTP 422 Unprocessable Entity."""
+        """Scenario 12: Missing required document_image field returns HTTP 422 Unprocessable Entity."""
         selfie_bytes = _draw_synthetic_selfie_image()
         response = client.post(
             "/api/v1/screen",
@@ -377,7 +417,7 @@ class TestUnifiedScreeningEndpoint:
         assert response.status_code == 422
 
     def test_invalid_document_type_returns_400(self, client):
-        """Scenario 11: Supplying an unsupported document_type returns HTTP 400 Bad Request."""
+        """Scenario 13: Supplying an unsupported document_type returns HTTP 400 Bad Request."""
         doc_bytes = _draw_synthetic_document_image("PASSPORT")
         response = client.post(
             "/api/v1/screen",
@@ -390,7 +430,7 @@ class TestUnifiedScreeningEndpoint:
         assert "Invalid document_type" in response.json()["detail"]
 
     def test_corrupted_document_returns_400(self, client):
-        """Scenario 12: Uploading an unreadable or non-image document returns HTTP 400 Bad Request."""
+        """Scenario 14: Uploading an unreadable or non-image document returns HTTP 400 Bad Request."""
         response = client.post(
             "/api/v1/screen",
             files={
@@ -400,7 +440,7 @@ class TestUnifiedScreeningEndpoint:
         assert response.status_code == 400
 
     def test_health_check_is_lightweight_and_fast(self, client):
-        """Verifies GET /health returns static 200 OK immediately with no blocking operations."""
+        """Scenario 15: Verifies GET /health returns static 200 OK immediately with no blocking operations."""
         import time
         start_time = time.perf_counter()
         response = client.get("/health")
@@ -412,11 +452,10 @@ class TestUnifiedScreeningEndpoint:
         assert "version" in data
         assert "service" in data
         assert "available_ocr_engines" in data
-        # Health check must respond in well under 100ms
         assert elapsed < 0.100
 
     def test_face_verification_module_failure_tolerance(self, client, mock_passport_ocr):
-        """If face verification module raises an unexpected exception, screening still succeeds with OCR and Tampering."""
+        """Scenario 16: If face verification module raises an unexpected exception, screening still succeeds with OCR."""
         class CrashingFaceService(FaceVerificationService):
             def verify_faces(self, *args, **kwargs):
                 raise RuntimeError("Face embedding engine timeout")
@@ -429,6 +468,7 @@ class TestUnifiedScreeningEndpoint:
 
             response = client.post(
                 "/api/v1/screen",
+                data={"verify_face": "true"},
                 files={
                     "document_image": ("passport.jpg", doc_bytes, "image/jpeg"),
                     "selfie_image": ("selfie.jpg", selfie_bytes, "image/jpeg")
@@ -444,4 +484,45 @@ class TestUnifiedScreeningEndpoint:
         finally:
             app.dependency_overrides.pop(get_face_verification_service, None)
 
+    def test_large_image_downscale_preserves_aspect_ratio_and_succeeds(self, client, mock_passport_ocr):
+        """Scenario 17: Large image (> 1400 px) is safely downscaled to max 1400 px without upscaling small images."""
+        large_img = np.full((2400, 1800, 3), 245, dtype=np.uint8)
+        resized, scale = resize_image_if_needed(large_img, max_dim=1400, min_dim=0)
+        assert max(resized.shape[:2]) == 1400
+        assert scale < 1.0
 
+        # Small image is not upscaled
+        small_img = np.full((300, 200, 3), 245, dtype=np.uint8)
+        small_resized, small_scale = resize_image_if_needed(small_img, max_dim=1400, min_dim=0)
+        assert small_resized.shape == small_img.shape
+        assert small_scale == 1.0
+
+    def test_mrz_staged_ocr_fallback_limits(self, client):
+        """Scenario 18: Staged OCR does not exceed MAX_MRZ_FALLBACK_ATTEMPTS passes when MRZ is missing."""
+        calls = {"extract": 0, "extract_mrz": 0}
+
+        class CountingMockEngine(MockOCREngine):
+            def extract_text(self, image):
+                calls["extract"] += 1
+                return OCRResult(raw_text="NOTHING TO SEE HERE", regions=[], average_confidence=0.1)
+
+            def extract_mrz_text(self, image, psm=6):
+                calls["extract_mrz"] += 1
+                return OCRResult(raw_text="", regions=[], average_confidence=0.0)
+
+        custom_ocr_service = OCRService(engine=CountingMockEngine())
+        app.dependency_overrides[get_ocr_service] = lambda: custom_ocr_service
+
+        try:
+            doc_bytes = _draw_synthetic_document_image("PASSPORT")
+            response = client.post(
+                "/api/v1/screen",
+                data={"document_type": "passport"},
+                files={"document_image": ("doc.jpg", doc_bytes, "image/jpeg")}
+            )
+            assert response.status_code == 200
+            # 1 primary OCR + 1 targeted crop + at most MAX_MRZ_FALLBACK_ATTEMPTS (3) = <= 5 calls total
+            assert calls["extract"] == 1
+            assert calls["extract_mrz"] <= (1 + settings.MAX_MRZ_FALLBACK_ATTEMPTS)
+        finally:
+            app.dependency_overrides.pop(get_ocr_service, None)
