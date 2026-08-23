@@ -6,9 +6,9 @@ spring:
     name: document-screening-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/document_screening}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:Shiva@37}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://dpg-da4n6m3tqb8s738cabb0-a:5432/document_screening}
+    username: ${SPRING_DATASOURCE_USERNAME:document_screening_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:Gi5g27ON42Nb8Qg06h38gNVL0RvPlDul}
     driver-class-name: org.postgresql.Driver
 
   jpa:

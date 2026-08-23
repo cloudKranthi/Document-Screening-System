@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Screening & Biometric Verification Portal | SIH 2026</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React 18 & Babel Standalone -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      background-color: #020617;
+      color: #f8fafc;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 font-sans antialiased text-slate-100 selection:bg-purple-500 selection:text-white">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const DEFAULT_BASE_URL = "https://document-screening-system.onrender.com";
+
+    // --- Status Badge Component ---
+    function StatusBadge({ status, size = "md" }) {
+      const s = (status || "").toUpperCase();
+      let colorClass = "bg-sky-500/10 text-sky-400 border-sky-500/30";
+      let dotClass = "bg-sky-400";
+      let icon = "◌";
+      let label = status;
+
+      if (s === "PASSED" || s === "VERIFIED" || s === "APPROVED") {
+        colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+        dotClass = "bg-emerald-400";
+        icon = "✓";
+        label = "PASSED";
+      } else if (s === "FLAGGED_FOR_ADMIN" || s === "SUSPICIOUS") {
+        colorClass = "bg-amber-500/10 text-amber-400 border-amber-500/30";
+        dotClass = "bg-amber-400";
+        icon = "⚠";
+        label = s.replace(/_/g, " ");
+      } else if (s === "VALIDATION_FAILED" || s === "REJECTED" || s === "FAILED") {
+        colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+        dotClass = "bg-rose-400";
+        icon = "✕";
+        label = "VALIDATION FAILED";
+      } else if (s === "IN_PROGRESS") {
+        colorClass = "bg-purple-500/10 text-purple-400 border-purple-500/30";
+        dotClass = "bg-purple-400 animate-pulse";
+        icon = "◌";
+        label = "IN PROGRESS";
+      }
+
+      const sizeClasses = size === "lg" ? "text-xs px-4 py-2 font-bold" : "text-xs px-3 py-1.5 font-semibold";
+
+      return (
+        <span className={`inline-flex items-center gap-1.5 rounded-full border ${colorClass} ${sizeClasses}`}>
+          <span className={`h-2 w-2 rounded-full ${dotClass} animate-pulse`} />
+          <span className="font-mono">{icon}</span>
+          <span className="tracking-wide uppercase font-bold text-[11px]">{label}</span>
+        </span>
+      );
+    }
+
+    // --- Final Verdict Banner Component ---
+    function VerdictBanner({ verdict, riskCategory, riskScore, status, screeningId }) {
+      const v = (verdict || "MANUAL_REVIEW_REQUIRED").toUpperCase();
+      const cat = (riskCategory || "MEDIUM").toUpperCase();
+
+      let style = {
+        bg: "from-amber-950 via-slate-900 to-amber-950/80 border-amber-800/80",
+        badge: "bg-amber-500 text-slate-950 font-black",
+        title: "text-amber-400",
+        icon: "⚠️",
+        desc: "Manual review required. Identity discrepancies or elevated risk threshold detected."
+      };
+
+      if (v === "ALLOW" || v === "PASSED") {
+        style = {
+          bg: "from-emerald-950 via-slate-900 to-emerald-950/80 border-emerald-800/80",
+          badge: "bg-emerald-500 text-slate-950 font-black",
+          title: "text-emerald-400",
+          icon: "✅",
+          desc: "Automated clearance authorized. Low risk tier, verified biometrics, and zero forensic tampering."
+        };
+      } else if (v === "REJECT" || v === "FAILED") {
+        style = {
+          bg: "from-rose-950 via-slate-900 to-rose-950/80 border-rose-800/80",
+          badge: "bg-rose-600 text-white font-black",
+          title: "text-rose-400",
+          icon: "🛑",
+          desc: "Immediate entry denial / rejection. Critical forensic anomaly or biometric mismatch detected."
+        };
+      }
+
+      return (
+        <div className={`rounded-3xl border bg-gradient-to-r p-6 sm:p-8 shadow-2xl ${style.bg} transition-all`}>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-3xl">{style.icon}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Final Risk Verdict:</span>
+                  <span className={`px-4 py-1.5 rounded-full text-xs uppercase tracking-wider ${style.badge}`}>
+                    {v.replace(/_/g, " ")}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-sm font-medium text-slate-200 max-w-2xl leading-relaxed">
+                {style.desc}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-slate-400 pt-1">
+                <span>Session UUID: <strong className="text-white">{screeningId}</strong></span>
+                <span>&bull;</span>
+                <span>State: <strong className="text-purple-300">{status}</strong></span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-5 bg-slate-950/80 border border-slate-800/90 px-6 py-4 rounded-2xl flex-shrink-0">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Risk Score</div>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <span className="text-3xl font-mono font-black text-white">{riskScore}</span>
+                  <span className="text-xs text-slate-400 font-mono">/ 100</span>
+                </div>
+                <div className="w-32 bg-slate-800 rounded-full h-2 mt-2 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${riskScore < 30 ? "bg-emerald-500" : riskScore < 60 ? "bg-amber-500" : "bg-rose-500"}`}
+                    style={{ width: `${Math.min(riskScore, 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="border-l border-slate-800 pl-5">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Risk Tier</div>
+                <span className={`inline-block mt-1 px-3 py-1 rounded-lg text-xs font-black uppercase font-mono ${
+                  cat === "LOW" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" :
+                  cat === "MEDIUM" ? "bg-amber-950 text-amber-400 border border-amber-800" :
+                  "bg-rose-950 text-rose-400 border border-rose-800"
+                }`}>
+                  {cat}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Biometric & Forensic Tampering Card Component ---
+    function BiometricTamperingCard({ biometricSummary, tamperingSummary, flaggedReasons }) {
+      const facePercent = ((biometricSummary?.faceSimilarityScore ?? 0) * 100).toFixed(1);
+      const photoTamperPercent = ((tamperingSummary?.photoTamperingScore ?? 0) * 100).toFixed(1);
+      const textManipPercent = ((tamperingSummary?.textManipulationScore ?? 0) * 100).toFixed(1);
+
+      return (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-purple-950/60 to-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-500/20 border border-purple-400/30 rounded-xl text-purple-300 text-lg">
+                👁️
+              </div>
+              <div>
+                <h2 className="text-sm font-bold tracking-wide text-white uppercase">Biometric & Tampering Analysis</h2>
+                <p className="text-xs text-slate-400">Live Selfie Biometrics & Forensic Tamper Engine</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {biometricSummary?.isMatch ? (
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/80 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>BIOMETRIC MATCH CONFIRMED</span>
+                </span>
+              ) : (
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-950 text-rose-300 border border-rose-800/80 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping"></span>
+                  <span>BIOMETRIC MISMATCH DETECTED</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              
+              {/* 1. Face Similarity */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Face Similarity</span>
+                  <p className="text-xs text-slate-300 font-medium mt-0.5">Selfie vs Passport</p>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-mono font-black text-white">{facePercent}%</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      biometricSummary?.isMatch ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"
+                    }`}>
+                      {biometricSummary?.isMatch ? "≥75% MATCH" : "<75% FAIL"}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2">
+                    <div
+                      className={`h-full rounded-full ${biometricSummary?.isMatch ? "bg-emerald-500" : "bg-rose-500"}`}
+                      style={{ width: `${Math.min(parseFloat(facePercent), 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Photo Tampering */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Photo Tampering (ELA)</span>
+                  <p className="text-xs text-slate-300 font-medium mt-0.5">Error Level Analysis</p>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-mono font-black text-white">{photoTamperPercent}%</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      (tamperingSummary?.photoTamperingScore ?? 0) <= 0.50 ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"
+                    }`}>
+                      {(tamperingSummary?.photoTamperingScore ?? 0) <= 0.50 ? "CLEAN" : "TAMPER"}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2">
+                    <div
+                      className={`h-full rounded-full ${(tamperingSummary?.photoTamperingScore ?? 0) <= 0.50 ? "bg-emerald-500" : "bg-rose-500"}`}
+                      style={{ width: `${Math.min(parseFloat(photoTamperPercent), 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Text Manipulation */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Text Manipulation</span>
+                  <p className="text-xs text-slate-300 font-medium mt-0.5">Font Splicing Check</p>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-mono font-black text-white">{textManipPercent}%</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                      {(tamperingSummary?.textManipulationScore ?? 0) < 0.4 ? "NORMAL" : "FLAGGED"}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2">
+                    <div
+                      className="h-full rounded-full bg-indigo-500"
+                      style={{ width: `${Math.min(parseFloat(textManipPercent), 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Metadata Anomaly */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Metadata Forensic</span>
+                  <p className="text-xs text-slate-300 font-medium mt-0.5">EXIF Artifacts</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs text-slate-400 font-mono">Anomaly Status</span>
+                  {tamperingSummary?.metadataAnomalyFound ? (
+                    <span className="text-xs font-bold px-2.5 py-1 rounded bg-rose-950 text-rose-400 border border-rose-800">
+                      ⚠️ ANOMALY
+                    </span>
+                  ) : (
+                    <span className="text-xs font-bold px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
+                      ✓ CLEAN
+                    </span>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Flagged Reasons */}
+            {flaggedReasons && flaggedReasons.length > 0 && (
+              <div className="bg-rose-950/20 border border-rose-800/60 rounded-xl p-4 space-y-2">
+                <div className="text-xs font-bold text-rose-400 flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>Active Threshold Violations ({flaggedReasons.length})</span>
+                </div>
+                <div className="space-y-1.5">
+                  {flaggedReasons.map((r, idx) => (
+                    <div key={idx} className="text-xs font-mono bg-slate-950/80 p-2.5 rounded-lg border border-rose-900/40 text-rose-200">
+                      • {r}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- Passport Card Component ---
+    function PassportCard({ data }) {
+      if (!data) return null;
+      const isExpired = data.passportExpiry ? new Date(data.passportExpiry).getTime() < new Date().getTime() : false;
+
+      return (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full">
+          <div className="px-5 py-3.5 bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-indigo-500/10 border border-indigo-500/30 rounded-lg text-indigo-400 text-sm">
+                🛂
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-200 text-xs tracking-wider uppercase">Passport Document</h3>
+                <p className="text-[11px] text-slate-400 font-mono">Doc: P &bull; ICAO 9303</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-mono text-indigo-300 bg-slate-800 border border-slate-700">
+              🌐 {data.passportNationality || "UNKNOWN"}
+            </span>
+          </div>
+
+          <div className="p-5 space-y-4 flex-1">
+            <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Passport Number</span>
+              <div className="text-base font-mono font-bold text-white tracking-widest mt-0.5">
+                {data.passportNumber || "NOT EXTRACTED"}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                Full Name (Passport Holder)
+              </label>
+              <div className="text-xs font-bold text-slate-200 bg-slate-950/50 border border-slate-800 rounded-lg px-3 py-2">
+                {data.passportName || "—"}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Date of Birth</label>
+                <div className="text-xs font-mono text-slate-300 bg-slate-950/50 border border-slate-800 rounded-lg px-2.5 py-1.5">
+                  📅 {data.passportDob || "—"}
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Passport Expiry</label>
+                <div className={`text-xs font-mono rounded-lg px-2.5 py-1.5 border ${
+                  isExpired ? "bg-rose-950/40 text-rose-400 border-rose-800 font-bold" : "bg-slate-950/50 text-slate-300 border-slate-800"
+                }`}>
+                  📅 {data.passportExpiry || "—"}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                MRZ Checksum (ICAO 9303)
+              </label>
+              {data.mrzChecksumValid === true ? (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-800/50 text-emerald-400 text-xs">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">✓</span>
+                  <div>
+                    <p className="font-bold text-emerald-300 text-xs">MRZ Checksum Valid</p>
+                    <p className="text-[10px] text-emerald-500/90 font-mono">2-line hash digits verified</p>
+                  </div>
+                </div>
+              ) : data.mrzChecksumValid === false ? (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-950/30 border border-rose-800/60 text-rose-400 text-xs">
+                  <span className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">!</span>
+                  <div>
+                    <p className="font-bold text-rose-300 text-xs">MRZ Checksum Failed</p>
+                    <p className="text-[10px] text-rose-400 font-mono">Tamper or scan corruption alert</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500 font-mono p-2 bg-slate-950 rounded-lg">MRZ Pending</div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Visa Card Component ---
+    function VisaCard({ data }) {
+      if (!data) return null;
+      const isExpired = data.visaValidUntil ? new Date(data.visaValidUntil).getTime() < new Date().getTime() : false;
+
+      return (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full">
+          <div className="px-5 py-3.5 bg-gradient-to-r from-slate-900 via-teal-950/60 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-teal-500/10 border border-teal-500/30 rounded-lg text-teal-400 text-sm">
+                📑
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-200 text-xs tracking-wider uppercase">Visa Authorization</h3>
+                <p className="text-[11px] text-teal-400/80 font-mono">Entry Permit</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-950/80 text-teal-300 border border-teal-700/60 font-mono">
+              {data.visaType || "UNKNOWN"}
+            </span>
+          </div>
+
+          <div className="p-5 space-y-4 flex-1">
+            <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Visa / Permit Number</span>
+              <div className="text-base font-mono font-bold text-white tracking-widest mt-0.5">
+                {data.visaNumber || "NOT EXTRACTED"}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                Visa Validity (Valid Until)
+              </label>
+              <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                isExpired ? "bg-rose-950/30 border-rose-800/60 text-rose-300" : "bg-emerald-950/30 border-emerald-800/50 text-emerald-300"
+              }`}>
+                <div>
+                  <div className="text-[10px] text-slate-400 mb-0.5">Validity Cutoff</div>
+                  <div className="text-xs font-mono font-bold">
+                    📅 {data.visaValidUntil || "—"}
+                  </div>
+                </div>
+                <div>
+                  {isExpired ? (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-black text-[10px]">
+                      EXPIRED
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white font-bold text-[10px]">
+                      ACTIVE
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/50 rounded-xl p-3 border border-slate-800/80 text-xs space-y-1.5">
+              <div className="flex justify-between text-slate-400 text-xs">
+                <span>Visa Classification:</span>
+                <span className="font-mono text-slate-200 font-bold">{data.visaType || "N/A"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- National ID Card Component ---
+    function NationalIdCard({ data }) {
+      if (!data) return null;
+      const isMatch = data.passportName && data.nationalIdName && data.passportName.trim().toUpperCase() === data.nationalIdName.trim().toUpperCase();
+
+      return (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full">
+          <div className="px-5 py-3.5 bg-gradient-to-r from-slate-900 via-blue-950/60 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-400 text-sm">
+                🪪
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-200 text-xs tracking-wider uppercase">National ID</h3>
+                <p className="text-[11px] text-blue-400/80 font-mono">Civil Registry</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-blue-950/80 text-blue-300 border border-blue-700/60">
+              Citizen ID
+            </span>
+          </div>
+
+          <div className="p-5 space-y-4 flex-1">
+            <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">ID / Citizen Number</span>
+              <div className="text-base font-mono font-bold text-white tracking-widest mt-0.5">
+                {data.nationalIdNumber || "NOT EXTRACTED"}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                Name on National ID
+              </label>
+              <div className="text-xs font-bold text-slate-200 bg-slate-950/50 border border-slate-800 rounded-lg px-3 py-2">
+                {data.nationalIdName || "—"}
+              </div>
+            </div>
+
+            <div className="pt-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                Passport Name Match
+              </label>
+              {isMatch ? (
+                <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-800/50 text-emerald-400 text-xs flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">✓</span>
+                  <div>
+                    <p className="font-bold text-emerald-300 text-xs">Name Matches Passport</p>
+                    <p className="text-[10px] text-emerald-500/90 font-mono">Identity string confirmed</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-rose-950/30 border border-rose-800/60 text-rose-300 text-xs flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">!</span>
+                  <div>
+                    <p className="font-bold text-rose-300 text-xs">Name Discrepancy</p>
+                    <p className="text-[10px] text-rose-400 font-mono mt-0.5">ID: "{data.nationalIdName}" &ne; Passport: "{data.passportName}"</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Validation Summary Panel ---
+    function ValidationSummaryPanel({ summary }) {
+      if (!summary) return null;
+
+      return (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-indigo-500/20 border border-indigo-400/30 rounded-xl text-indigo-400 text-lg">
+                🛡️
+              </div>
+              <div>
+                <h2 className="text-sm font-bold tracking-wide text-white uppercase">Validation Summary</h2>
+                <p className="text-xs text-slate-400">Cross-Document Rule Evaluation</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {summary.isValid ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>✓ VALIDATION PASSED</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                  <span className="h-2 w-2 rounded-full bg-rose-400 animate-pulse" />
+                  <span>✕ VALIDATION FAILED</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Name Consistency</span>
+                  <p className="text-xs text-slate-300 font-medium mt-1">Cross-Document Matching</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-mono">isNameConsistent</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                    summary.isNameConsistent ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"
+                  }`}>
+                    {summary.isNameConsistent ? "✓ MATCHED" : "✕ MISMATCH"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">DOB Consistency</span>
+                  <p className="text-xs text-slate-300 font-medium mt-1">Date of Birth Check</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-mono">isDobConsistent</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                    summary.isDobConsistent ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"
+                  }`}>
+                    {summary.isDobConsistent ? "✓ MATCHED" : "✕ MISMATCH"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Nationality Check</span>
+                  <p className="text-xs text-slate-300 font-medium mt-1">Claimed vs Passport</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-mono">isNationalityConsistent</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                    summary.isNationalityConsistent ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"
+                  }`}>
+                    {summary.isNationalityConsistent ? "✓ MATCHED" : "✕ MISMATCH"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Document Expiry</span>
+                  <p className="text-xs text-slate-300 font-medium mt-1">Passport & Visa Dates</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-mono">isDocumentExpired</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                    !summary.isDocumentExpired ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"
+                  }`}>
+                    {!summary.isDocumentExpired ? "✓ ACTIVE" : "✕ EXPIRED"}
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {summary.validationErrors && summary.validationErrors.length > 0 ? (
+              <div className="bg-rose-950/20 border border-rose-800/60 rounded-xl p-4">
+                <div className="text-xs font-bold text-rose-400 flex items-center gap-2 mb-2">
+                  <span>⚠️</span>
+                  <span>Validation Errors Flagged ({summary.validationErrors.length})</span>
+                </div>
+                <div className="space-y-1.5">
+                  {summary.validationErrors.map((err, i) => (
+                    <div key={i} className="text-xs font-mono bg-slate-950/80 p-2.5 rounded-lg border border-rose-900/40 text-rose-200">
+                      • {err}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-xl p-3.5 flex items-center gap-2 text-xs text-emerald-300">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">✓</span>
+                <span>No validation errors detected. All rule checks passed.</span>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- Admin Queue Modal ---
+    function AdminQueueModal({ isOpen, onClose, baseUrl }) {
+      const [items, setItems] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+
+      const fetchQueue = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const url = `${baseUrl.replace(/\/+$/, "")}/api/v1/screenings/admin/flagged-queue?page=0&size=20`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          const data = await res.json();
+          setItems(data);
+        } catch (err) {
+          setError(err.message || "Failed to load flagged queue.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        if (isOpen) fetchQueue();
+      }, [isOpen, baseUrl]);
+
+      if (!isOpen) return null;
+
+      return (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl flex flex-col max-h-[85vh] space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📋</span>
+                <div>
+                  <h2 className="text-base font-bold text-white">Admin Flagged Review Queue</h2>
+                  <p className="text-xs text-slate-400 font-mono">GET /api/v1/screenings/admin/flagged-queue</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={fetchQueue} className="px-3 py-1.5 text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg">
+                  🔄 Refresh
+                </button>
+                <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg">✕</button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto space-y-3">
+              {loading && <div className="py-12 text-center text-xs text-slate-400 font-mono">Loading cases...</div>}
+              {error && <div className="p-4 bg-rose-950/40 border border-rose-800 text-rose-300 rounded-xl text-xs font-mono">{error}</div>}
+              {!loading && !error && items.length === 0 && (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  <p className="text-2xl mb-1">🎉</p>
+                  <p className="font-bold text-slate-300">No Flagged Cases in Queue</p>
+                </div>
+              )}
+
+              {!loading && items.map((item) => (
+                <div key={item.screeningId} className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-mono font-bold text-white">{item.screeningId}</span>
+                    <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                      item.riskCategory === "HIGH" ? "bg-rose-950 text-rose-400 border border-rose-800" : "bg-amber-950 text-amber-400 border border-amber-800"
+                    }`}>
+                      Risk: {item.finalRiskScore}/100 ({item.riskCategory})
+                    </span>
+                  </div>
+                  {item.flaggedReasons && item.flaggedReasons.map((r, i) => (
+                    <p key={i} className="text-xs text-amber-300 font-mono">• {r}</p>
+                  ))}
+                  <p className="text-[10px] text-slate-500 font-mono">Created: {item.createdAt}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex justify-end">
+              <button onClick={onClose} className="px-5 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-xl">
+                Close Queue
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Main Application Component ---
+    function App() {
+      const [backendUrl, setBackendUrl] = useState(DEFAULT_BASE_URL);
+      const [nationality, setNationality] = useState("IND");
+      const [passportFile, setPassportFile] = useState(null);
+      const [visaFile, setVisaFile] = useState(null);
+      const [nationalIdFile, setNationalIdFile] = useState(null);
+      const [livePhotoFile, setLivePhotoFile] = useState(null);
+
+      const [isLoading, setIsLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [response, setResponse] = useState(null);
+      const [isJsonOpen, setIsJsonOpen] = useState(false);
+      const [isAdminQueueOpen, setIsAdminQueueOpen] = useState(false);
+
+      const handleFormSubmit = async (e) => {
+        e.preventDefault();
+        setError(null);
+
+        if (!passportFile) {
+          setError("Please select the Passport document file.");
+          return;
+        }
+        if (!visaFile) {
+          setError("Please select the Visa document file.");
+          return;
+        }
+        if (!nationalIdFile) {
+          setError("Please select the National ID card file.");
+          return;
+        }
+        if (!livePhotoFile) {
+          setError("Please select the Live Selfie photo.");
+          return;
+        }
+        if (!nationality.trim()) {
+          setError("Please enter the claimed nationality.");
+          return;
+        }
+
+        setIsLoading(true);
+
+        const formData = new FormData();
+        formData.append("passportFile", passportFile);
+        formData.append("visaFile", visaFile);
+        formData.append("nationalIdFile", nationalIdFile);
+        formData.append("livePhotoFile", livePhotoFile);
+        formData.append("nationality", nationality.trim());
+
+        const targetUrl = `${backendUrl.replace(/\/+$/, "")}/api/v1/screenings/submit-and-validate`;
+
+        try {
+          const res = await fetch(targetUrl, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!res.ok) {
+            let detail = "";
+            try { detail = await res.text(); } catch(_) {}
+            throw new Error(`Server returned status ${res.status} (${res.statusText})${detail ? `: ${detail}` : ""}`);
+          }
+
+          const data = await res.json();
+          setResponse(data);
+        } catch (err) {
+          console.error("Screening request error:", err);
+          setError(
+            err.message || `Failed to connect to backend server. Please verify network connection.`
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      const handleReset = () => {
+        setResponse(null);
+        setError(null);
+        setPassportFile(null);
+        setVisaFile(null);
+        setNationalIdFile(null);
+        setLivePhotoFile(null);
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+          
+          {/* Header */}
+          <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-xl">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 via-indigo-600 to-blue-600 flex items-center justify-center shadow-lg shadow-purple-600/30 text-lg">
+                  🛡️
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="font-extrabold text-sm tracking-tight text-white">DOCUSCREEN <span className="text-purple-400 font-mono text-xs font-normal">Biometric & Document Screening</span></h1>
+                    {response && <StatusBadge status={response.status} size="sm" />}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Automated Identity Verification & Border Security Portal
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => setIsAdminQueueOpen(true)}
+                  className="px-3.5 py-1.5 text-xs font-bold text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-800/60 rounded-xl transition-all flex items-center gap-1.5"
+                >
+                  <span>📋</span>
+                  <span>Admin Flagged Queue</span>
+                </button>
+
+                {response && (
+                  <>
+                    <button
+                      onClick={() => setIsJsonOpen(!isJsonOpen)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
+                        isJsonOpen ? "bg-purple-600 border-purple-500 text-white" : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      {'{ }'} Inspect Response JSON
+                    </button>
+                    <button
+                      onClick={handleReset}
+                      className="px-4 py-1.5 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl"
+                    >
+                      New Screening
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {/* Main Body */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8">
+            
+            {/* View 1: Clean Upload Form */}
+            {!response && (
+              <div className="max-w-3xl mx-auto space-y-6">
+                
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950/80 to-purple-950/60 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl">
+                  <h2 className="text-xl font-bold text-white tracking-tight">Passenger Screening & Biometric Verification</h2>
+                  <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                    Upload the applicant's identity documents along with a live selfie photo. The system will perform OCR extraction, cross-document matching, facial biometric comparison, and tamper forensics.
+                  </p>
+                </div>
+
+                {/* Error Box */}
+                {error && (
+                  <div className="bg-rose-950/40 border border-rose-800/80 text-rose-300 p-4 rounded-2xl text-xs space-y-1.5">
+                    <div className="flex items-center gap-2 font-bold text-rose-200">
+                      <span>⚠️ Submission Error</span>
+                    </div>
+                    <p className="font-mono text-xs">{error}</p>
+                  </div>
+                )}
+
+                {/* Form */}
+                <form onSubmit={handleFormSubmit} className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+                  
+                  {/* 1. Nationality */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                      Claimed Nationality
+                    </label>
+                    <input
+                      type="text"
+                      value={nationality}
+                      onChange={(e) => setNationality(e.target.value.toUpperCase())}
+                      placeholder="e.g. IND, USA, GBR, CAN, DEU"
+                      required
+                      className="w-full px-4 py-2.5 text-sm font-mono font-bold text-white bg-slate-950 border border-slate-800 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none uppercase"
+                    />
+                  </div>
+
+                  {/* 2. Live Selfie Photo */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Live Selfie Photo
+                    </label>
+                    <div className="border border-slate-800 hover:border-purple-500/50 bg-slate-950/60 rounded-2xl p-4 transition-all">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">📸</span>
+                          <div>
+                            <h3 className="text-xs font-bold text-slate-200">Live Selfie Photo</h3>
+                            <p className="text-[11px] text-slate-400">
+                              {livePhotoFile ? (
+                                <span className="text-emerald-400 font-medium font-mono">
+                                  ✓ {livePhotoFile.name} ({(livePhotoFile.size / 1024).toFixed(1)} KB)
+                                </span>
+                              ) : (
+                                "Upload applicant selfie photo (.jpg, .jpeg, .png)"
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {!livePhotoFile ? (
+                            <label className="cursor-pointer px-4 py-2 text-xs font-bold text-purple-300 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-800/60 rounded-xl transition-all text-center flex-shrink-0">
+                              <span>Select Photo</span>
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/jpg"
+                                onChange={(e) => setLivePhotoFile(e.target.files[0] || null)}
+                                className="hidden"
+                                required
+                              />
+                            </label>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setLivePhotoFile(null)}
+                              className="px-3 py-1.5 text-xs font-semibold text-rose-400 hover:text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 rounded-xl transition-all"
+                            >
+                              Change Photo
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Three Identity Documents */}
+                  <div className="space-y-3.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Identity Documents
+                    </label>
+
+                    {/* Passport */}
+                    <div className="border border-slate-800 hover:border-indigo-500/50 bg-slate-950/60 rounded-2xl p-4 transition-all">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">🛂</span>
+                          <div>
+                            <h3 className="text-xs font-bold text-slate-200">
+                              Passport Document
+                            </h3>
+                            <p className="text-[11px] text-slate-400">
+                              {passportFile ? (
+                                <span className="text-emerald-400 font-medium font-mono">
+                                  ✓ {passportFile.name} ({(passportFile.size / 1024).toFixed(1)} KB)
+                                </span>
+                              ) : (
+                                "Upload passport photo / scan (.pdf, .jpg, .png)"
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <label className="cursor-pointer px-4 py-2 text-xs font-bold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-800/60 rounded-xl transition-all text-center flex-shrink-0">
+                          <span>{passportFile ? 'Change File' : 'Select File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
+                            onChange={(e) => setPassportFile(e.target.files[0] || null)}
+                            className="hidden"
+                            required
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Visa */}
+                    <div className="border border-slate-800 hover:border-indigo-500/50 bg-slate-950/60 rounded-2xl p-4 transition-all">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">📑</span>
+                          <div>
+                            <h3 className="text-xs font-bold text-slate-200">
+                              Visa / Entry Permit
+                            </h3>
+                            <p className="text-[11px] text-slate-400">
+                              {visaFile ? (
+                                <span className="text-emerald-400 font-medium font-mono">
+                                  ✓ {visaFile.name} ({(visaFile.size / 1024).toFixed(1)} KB)
+                                </span>
+                              ) : (
+                                "Upload visa scan / document (.pdf, .jpg, .png)"
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <label className="cursor-pointer px-4 py-2 text-xs font-bold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-800/60 rounded-xl transition-all text-center flex-shrink-0">
+                          <span>{visaFile ? 'Change File' : 'Select File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
+                            onChange={(e) => setVisaFile(e.target.files[0] || null)}
+                            className="hidden"
+                            required
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* National ID */}
+                    <div className="border border-slate-800 hover:border-indigo-500/50 bg-slate-950/60 rounded-2xl p-4 transition-all">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">🪪</span>
+                          <div>
+                            <h3 className="text-xs font-bold text-slate-200">
+                              National ID / Citizen Card
+                            </h3>
+                            <p className="text-[11px] text-slate-400">
+                              {nationalIdFile ? (
+                                <span className="text-emerald-400 font-medium font-mono">
+                                  ✓ {nationalIdFile.name} ({(nationalIdFile.size / 1024).toFixed(1)} KB)
+                                </span>
+                              ) : (
+                                "Upload national ID scan / card (.pdf, .jpg, .png)"
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <label className="cursor-pointer px-4 py-2 text-xs font-bold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-800/60 rounded-xl transition-all text-center flex-shrink-0">
+                          <span>{nationalIdFile ? 'Change File' : 'Select File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
+                            onChange={(e) => setNationalIdFile(e.target.files[0] || null)}
+                            className="hidden"
+                            required
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Submit Action */}
+                  <div className="pt-4 border-t border-slate-800 flex items-center justify-end">
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full sm:w-auto px-8 py-3.5 text-xs font-bold text-white bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-60 rounded-2xl shadow-xl shadow-purple-600/30 transition-all flex items-center justify-center gap-2.5 uppercase tracking-wider"
+                    >
+                      {isLoading ? (
+                        <>
+                          <span className="animate-spin text-sm">◌</span>
+                          <span>Processing Documents & Running Biometric Verification...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🚀</span>
+                          <span>Run Document Screening & Verification</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* View 2: Real Unified Response Dashboard */}
+            {response && (
+              <div className="space-y-8 animate-in fade-in duration-300">
+                
+                {/* 1. Final Verdict & Risk Header Banner */}
+                <VerdictBanner
+                  verdict={response.verdict}
+                  riskCategory={response.riskCategory}
+                  riskScore={response.riskScore}
+                  status={response.status}
+                  screeningId={response.screeningId}
+                />
+
+                {/* 2. Biometric & Forensic Tampering Deep-Learning Analysis */}
+                <BiometricTamperingCard
+                  biometricSummary={response.biometricSummary}
+                  tamperingSummary={response.tamperingSummary}
+                  flaggedReasons={response.flaggedReasons}
+                />
+
+                {/* 3. Extracted Document Records (Passport, Visa, National ID) */}
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                    Extracted Document Records
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <PassportCard data={response.extractedData} />
+                    <VisaCard data={response.extractedData} />
+                    <NationalIdCard data={response.extractedData} />
+                  </div>
+                </div>
+
+                {/* 4. Cross-Document Validation Summary */}
+                <div>
+                  <ValidationSummaryPanel summary={response.validationSummary} />
+                </div>
+
+                {/* Action Row */}
+                <div className="flex flex-wrap justify-between items-center gap-4 pt-4">
+                  <button
+                    onClick={handleReset}
+                    className="px-5 py-2.5 text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all"
+                  >
+                    ← Submit Another Passenger
+                  </button>
+
+                  <button
+                    onClick={() => setIsJsonOpen(true)}
+                    className="px-5 py-2.5 text-xs font-bold text-purple-300 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-800/60 rounded-xl transition-all"
+                  >
+                    {'{ }'} Inspect Raw Response JSON
+                  </button>
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* Raw JSON Drawer */}
+          {isJsonOpen && response && (
+            <div className="fixed inset-y-0 right-0 z-50 max-w-xl w-full bg-slate-950/95 border-l border-slate-800 shadow-2xl flex flex-col p-6 space-y-4 animate-in slide-in-from-right">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono">Response Payload</h3>
+                </div>
+                <button onClick={() => setIsJsonOpen(false)} className="text-slate-400 hover:text-white p-1">✕</button>
+              </div>
+              <pre className="flex-1 overflow-auto bg-slate-900 p-4 rounded-xl text-xs font-mono text-emerald-400 border border-slate-800 leading-relaxed">
+                <code>{JSON.stringify(response, null, 2)}</code>
+              </pre>
+            </div>
+          )}
+
+          {/* Admin Queue Modal */}
+          <AdminQueueModal
+            isOpen={isAdminQueueOpen}
+            onClose={() => setIsAdminQueueOpen(false)}
+            baseUrl={backendUrl}
+          />
+
+          {/* Footer */}
+          <footer className="border-t border-slate-900 py-6 text-center text-xs text-slate-500 bg-slate-950">
+            Document Screening & Biometric Verification Portal &bull; SIH 2026
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

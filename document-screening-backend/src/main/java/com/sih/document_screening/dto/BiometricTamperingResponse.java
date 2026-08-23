@@ -4,7 +4,6 @@ import java.util.List;
 
 public record BiometricTamperingResponse(
     double faceSimilarityScore,
-    boolean isFaceMatch,
     double photoTamperingScore,
     double textManipulationScore,
     boolean metadataAnomalyFound,
